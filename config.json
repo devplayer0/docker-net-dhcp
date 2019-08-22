@@ -1,0 +1,29 @@
+{
+    "description": "Docker host bridge DHCP networking",
+    "interface": {
+        "socket": "net-dhcp.sock",
+        "types": [
+            "docker.networkdriver/1.0",
+            "docker.ipamdriver/1.0"
+        ]
+    },
+    "entrypoint": [ "/opt/plugin/launch.sh" ],
+    "workdir": "/opt/plugin",
+    "network": {
+        "type": "host"
+    },
+    "linux": {
+        "capabilities": [
+            "CAP_SYS_ADMIN"
+        ]
+    },
+    "env": [
+        {
+            "name": "GUNICORN_OPTS",
+            "settable": [
+                "value"
+            ],
+            "value": "--log-level DEBUG --log-file /var/log/net-dhcp.log"
+        }
+    ]
+}

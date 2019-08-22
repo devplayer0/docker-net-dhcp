@@ -1,0 +1,4 @@
+/plugin/
+__pycache__/
+
+.vscode/
