@@ -177,3 +177,22 @@ def delete_endpoint():
         .commit())
 
     return jsonify({})
+
+@app.route('/NetworkDriver.Join', methods=['POST'])
+def join():
+    req = request.get_json(force=True)
+    logger.info(req)
+
+    bridge = net_bridge(req['NetworkID'])
+    _if_host, if_container = veth_pair(req['EndpointID'])
+
+    return jsonify({
+        'InterfaceName': {
+            'SrcName': if_container,
+            'DstPrefix': bridge.ifname
+        }
+    })
+
+@app.route('/NetworkDriver.Leave', methods=['POST'])
+def leave():
+    return jsonify({})
