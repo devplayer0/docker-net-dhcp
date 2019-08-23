@@ -10,6 +10,7 @@ from flask import request, jsonify
 
 from . import app
 
+OPTS_KEY = 'com.docker.network.generic' 
 BRIDGE_OPT = 'devplayer0.net-dhcp.bridge'
 
 logger = logging.getLogger('gunicorn.error')
@@ -47,10 +48,11 @@ def net_get_capabilities():
 
 @app.route('/NetworkDriver.CreateNetwork', methods=['POST'])
 def create_net():
-    if BRIDGE_OPT not in request.json['Options']:
+    req = request.get_json(force=True)
+    if BRIDGE_OPT not in req['Options'][OPTS_KEY]:
         return jsonify({'Err': 'No bridge provided'}), 400
 
-    desired = request.json[BRIDGE_OPT]
+    desired = req['Options'][OPTS_KEY][BRIDGE_OPT]
     bridges = get_bridges()
     if desired not in bridges:
         return jsonify({'Err': f'Bridge "{desired}" not found (or the specified bridge is already used by Docker)'}), 400
@@ -58,6 +60,7 @@ def create_net():
     if request.json['IPv6Data']:
         return jsonify({'Err': 'IPv6 is currently unsupported'}), 400
 
+    logger.info(f'Creating network "{req["NetworkID"]}" (using bridge "{desired}")')
     return jsonify({})
 
 @app.route('/NetworkDriver.DeleteNetwork', methods=['POST'])
