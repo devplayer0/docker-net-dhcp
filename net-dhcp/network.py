@@ -97,16 +97,13 @@ def create_endpoint():
     }
 
     try:
-        if 'MacAddress' in req_iface and req_iface['MacAddress']:
-            (if_container
-                .set('address', req_iface['MacAddress'])
-                .commit())
-        else:
+        if 'MacAddress' not in req_iface or not req_iface['MacAddress']:
             res_iface['MacAddress'] = if_container['address']
 
         def try_addr(type_):
             k = 'AddressIPv6' if type_ == 'v6' else 'Address'
             if k in req_iface and req_iface[k]:
+                # Just validate the address, Docker will add it to the interface for us
                 a = ipaddress.ip_address(req_iface[k])
                 net = None
                 for addr in bridge_addrs:
@@ -119,9 +116,6 @@ def create_endpoint():
 
                 to_add = f'{a}/{net.prefixlen}'
                 logger.info('Adding address %s to %s', to_add, if_container['ifname'])
-                (if_container
-                    .add_ip(to_add)
-                    .commit())
             elif type_ == 'v4':
                 raise NetDhcpError(400, f'DHCP{type_} is currently unsupported')
         try_addr('v4')
@@ -193,32 +187,20 @@ def join():
         },
         'StaticRoutes': []
     }
-    nonlink = []
     for route in bridge.routes:
         # TODO: IPv6 routes
         if route['type'] != rtypes['RTN_UNICAST'] or route['family'] != socket.AF_INET:
             continue
 
-        logging.info(route)
         if route['dst'] == '' and 'Gateway' not in res:
             res['Gateway'] = route['gateway']
             continue
-
-        dst = f'{route["dst"]}/{route["dst_len"]}'
-        if route['gateway']:
-            nonlink.append({
-                'Destination': dst,
+        elif route['gateway']:
+            res['StaticRoutes'].append({
+                'Destination': f'{route["dst"]}/{route["dst_len"]}',
                 'RouteType': 0,
                 'NextHop': route['gateway']
             })
-        else:
-            # on-link route
-            res['StaticRoutes'].append({
-                'Destination': dst,
-                'RouteType': 1
-            })
-    # we need to add the on-link routes first
-    res['StaticRoutes'] += nonlink
 
     logger.info(res)
     return jsonify(res)
