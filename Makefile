@@ -1,15 +1,17 @@
 PLUGIN_NAME = devplayer0/net-dhcp
 PLUGIN_TAG ?= latest
 
-all: clean rootfs create
+all: clean rootfs build create
 
 clean:
 	@echo "### rm ./plugin"
 	@rm -rf ./plugin
 
-rootfs:
+build:
 	@echo "### docker build: rootfs image with net-dhcp"
 	@docker build -t ${PLUGIN_NAME}:rootfs .
+
+rootfs:
 	@echo "### create rootfs directory in ./plugin/rootfs"
 	@mkdir -p ./plugin/rootfs
 	@docker create --name tmp ${PLUGIN_NAME}:rootfs
@@ -23,6 +25,10 @@ create:
 	@docker plugin rm -f ${PLUGIN_NAME}:${PLUGIN_TAG} || true
 	@echo "### create new plugin ${PLUGIN_NAME}:${PLUGIN_TAG} from ./plugin"
 	@docker plugin create ${PLUGIN_NAME}:${PLUGIN_TAG} ./plugin
+
+debug:
+	@docker run --rm -ti --cap-add CAP_SYS_ADMIN --network host --volume /run/docker/plugins:/run/docker/plugins \
+		--volume /run/docker.sock:/run/docker.sock ${PLUGIN_NAME}:rootfs
 
 enable:		
 	@echo "### enable plugin ${PLUGIN_NAME}:${PLUGIN_TAG}"		

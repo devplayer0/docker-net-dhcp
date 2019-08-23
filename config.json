@@ -12,6 +12,13 @@
     "network": {
         "type": "host"
     },
+    "mounts": [
+        {
+            "source": "/var/run/docker.sock",
+            "destination": "/run/docker.sock",
+            "type": "bind"
+        }
+    ],
     "linux": {
         "capabilities": [
             "CAP_SYS_ADMIN"
