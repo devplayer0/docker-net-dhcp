@@ -2,6 +2,11 @@ import logging
 
 from flask import Flask, jsonify
 
+class NetDhcpError(Exception):
+    def __init__(self, status, *args):
+        Exception.__init__(self, *args)
+        self.status = status
+
 app = Flask(__name__)
 
 from . import network
@@ -15,4 +20,4 @@ def err_not_found(e):
 @app.errorhandler(Exception)
 def err(e):
     logger.exception(e)
-    return jsonify({'Err': f'Error: {e}'}), 500
+    return jsonify({'Err': str(e)}), 500

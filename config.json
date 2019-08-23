@@ -23,7 +23,7 @@
     ],
     "linux": {
         "capabilities": [
-            "CAP_SYS_ADMIN"
+            "CAP_NET_ADMIN"
         ]
     },
     "env": [
