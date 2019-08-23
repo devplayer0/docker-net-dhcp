@@ -66,7 +66,7 @@ def create_net():
     if request.json['IPv6Data']:
         return jsonify({'Err': 'IPv6 is currently unsupported'}), 400
 
-    logger.info(f'Creating network "{req["NetworkID"]}" (using bridge "{desired}")')
+    logger.info('Creating network "%s" (using bridge "%s")', req['NetworkID'], desired)
     return jsonify({})
 
 @app.route('/NetworkDriver.DeleteNetwork', methods=['POST'])
@@ -82,7 +82,7 @@ def create_endpoint():
     bridge_addrs = iface_addrs(bridge)
 
     if_host, if_container = veth_pair(req['EndpointID'])
-    logger.info(f'creating veth pair {if_host} <=> {if_container}')
+    logger.info('creating veth pair %s <=> %s', if_host, if_container)
     if_host = (ndb.interfaces.create(ifname=if_host, kind='veth', peer=if_container)
                 .set('state', 'up')
                 .commit())
@@ -118,7 +118,7 @@ def create_endpoint():
                     raise NetDhcpError(400, f'No suitable network found for {type_} address {a} on bridge {bridge["ifname"]}')
 
                 to_add = f'{a}/{net.prefixlen}'
-                logger.info(f'Adding address {to_add} to {if_container["ifname"]}')
+                logger.info('Adding address %s to %s', to_add, if_container['ifname'])
                 (if_container
                     .add_ip(to_add)
                     .commit())

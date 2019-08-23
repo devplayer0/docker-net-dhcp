@@ -14,7 +14,7 @@ from . import network
 logger = logging.getLogger('gunicorn.error')
 
 @app.errorhandler(404)
-def err_not_found(e):
+def err_not_found(_e):
     return jsonify({'Err': 'API not found'}), 404
 
 @app.errorhandler(Exception)
