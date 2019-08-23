@@ -79,7 +79,7 @@ def create_endpoint():
     req_iface = req['Interface']
 
     bridge = net_bridge(req['NetworkID'])
-    bridge_nets = iface_nets(bridge)
+    bridge_addrs = iface_addrs(bridge)
 
     if_host, if_container = veth_pair(req['EndpointID'])
     logger.info(f'creating veth pair {if_host} <=> {if_container}')
@@ -107,16 +107,21 @@ def create_endpoint():
             k = 'AddressIPv6' if type_ == 'v6' else 'Address'
             if k in req_iface and req_iface[k]:
                 a = ipaddress.ip_address(req_iface[k])
-                net = next(filter(lambda n: a in n, bridge_nets), None)
+                net = None
+                for addr in bridge_addrs:
+                    if a == addr.ip:
+                        raise NetDhcpError(400, f'Address {a} is already in use on bridge {bridge.ifname}')
+                    if a in addr.network:
+                        net = addr.network
                 if not net:
                     raise NetDhcpError(400, f'No suitable network found for {type_} address {a} on bridge {bridge.ifname}')
 
                 to_add = f'{a}/{net.prefixlen}'
-                logger.info(f'Adding address {a}/{net.prefixlen} to {if_container}')
+                logger.info(f'Adding address {a}/{net.prefixlen} to {if_container.ifname}')
                 (if_container
                     .add_ip(to_add)
                     .commit())
-            else:
+            elif type == 'v4':
                 raise NetDhcpError(400, f'DHCP{type_} is currently unsupported')
         try_addr('v4')
         try_addr('v6')
