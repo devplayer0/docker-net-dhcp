@@ -3,8 +3,7 @@
     "interface": {
         "socket": "net-dhcp.sock",
         "types": [
-            "docker.networkdriver/1.0",
-            "docker.ipamdriver/1.0"
+            "docker.networkdriver/1.0"
         ]
     },
     "entrypoint": [ "/opt/plugin/launch.sh" ],
@@ -16,7 +15,10 @@
         {
             "source": "/var/run/docker.sock",
             "destination": "/run/docker.sock",
-            "type": "bind"
+            "type": "bind",
+            "options": [
+                "bind"
+            ]
         }
     ],
     "linux": {

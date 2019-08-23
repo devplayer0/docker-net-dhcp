@@ -2,7 +2,7 @@ from flask import Flask, jsonify
 
 app = Flask(__name__)
 
-from . import network, ipam
+from . import network
 
 @app.errorhandler(404)
 def err_not_found(e):

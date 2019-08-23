@@ -30,10 +30,10 @@ debug:
 	@docker run --rm -ti --cap-add CAP_SYS_ADMIN --network host --volume /run/docker/plugins:/run/docker/plugins \
 		--volume /run/docker.sock:/run/docker.sock ${PLUGIN_NAME}:rootfs
 
-enable:		
+enable:
 	@echo "### enable plugin ${PLUGIN_NAME}:${PLUGIN_TAG}"		
 	@docker plugin enable ${PLUGIN_NAME}:${PLUGIN_TAG}
 
-push:  clean rootfs create enable
+push: clean rootfs create enable
 	@echo "### push plugin ${PLUGIN_NAME}:${PLUGIN_TAG}"
 	@docker plugin push ${PLUGIN_NAME}:${PLUGIN_TAG}
