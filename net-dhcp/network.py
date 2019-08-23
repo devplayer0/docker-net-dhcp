@@ -181,17 +181,42 @@ def delete_endpoint():
 @app.route('/NetworkDriver.Join', methods=['POST'])
 def join():
     req = request.get_json(force=True)
-    logger.info(req)
 
     bridge = net_bridge(req['NetworkID'])
     _if_host, if_container = veth_pair(req['EndpointID'])
 
-    return jsonify({
+    res = {
         'InterfaceName': {
             'SrcName': if_container,
             'DstPrefix': bridge.ifname
-        }
-    })
+        },
+        'StaticRoutes': []
+    }
+    # TODO: IPv6 routes
+    nonlink = []
+    for route in ipdb.routes:
+        logging.info(route)
+        if route.oif != bridge.index:
+            continue
+        if route.dst == 'default' and 'Gateway' not in res:
+            res['Gateway'] = route.gateway
+        elif route.gateway:
+            nonlink.append({
+                'Destination': route.dst,
+                'RouteType': 0,
+                'NextHop': route.gateway
+            })
+        else:
+            # on-link route
+            res['StaticRoutes'].append({
+                'Destination': route.dst,
+                'RouteType': 1
+            })
+    # we need to add the on-link routes first
+    res['StaticRoutes'] += nonlink
+
+    logger.info(res)
+    return jsonify(res)
 
 @app.route('/NetworkDriver.Leave', methods=['POST'])
 def leave():
