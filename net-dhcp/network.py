@@ -1,10 +1,11 @@
 import itertools
 import ipaddress
-from os import path
 import logging
 import atexit
+import socket
 
 import pyroute2
+from pyroute2.netlink.rtnl import rtypes
 import docker
 from flask import request, jsonify
 
@@ -15,10 +16,10 @@ BRIDGE_OPT = 'devplayer0.net-dhcp.bridge'
 
 logger = logging.getLogger('gunicorn.error')
 
-ipdb = pyroute2.IPDB()
+ndb = pyroute2.NDB()
 @atexit.register
-def close_ipdb():
-    ipdb.release()
+def close_ndb():
+    ndb.close()
 
 client = docker.from_env()
 @atexit.register
@@ -29,21 +30,20 @@ def veth_pair(e):
     return f'dh-{e[:12]}', f'{e[:12]}-dh'
 
 def iface_addrs(iface):
-    return list(map(ipaddress.ip_interface, iface.ipaddr))
+    return list(map(lambda a: ipaddress.ip_interface((a['address'], a['prefixlen'])), iface.ipaddr))
 def iface_nets(iface):
-    return list(map(lambda n: n.network, map(ipaddress.ip_interface, iface.ipaddr)))
+    return list(map(lambda n: n.network, iface_addrs(iface)))
 
 def get_bridges():
     reserved_nets = set(map(ipaddress.ip_network, map(lambda c: c['Subnet'], \
         itertools.chain.from_iterable(map(lambda i: i['Config'], filter(lambda i: i['Driver'] != 'net-dhcp', \
             map(lambda n: n.attrs['IPAM'], client.networks.list())))))))
 
-    return dict(map(lambda i: (i.ifname, i), filter(lambda i: i.kind == 'bridge' and not \
-        set(iface_nets(i)).intersection(reserved_nets), map(lambda i: ipdb.interfaces[i], \
-            filter(lambda k: isinstance(k, str), ipdb.interfaces.keys())))))
+    return dict(map(lambda i: (i['ifname'], i), filter(lambda i: i['kind'] == 'bridge' and not \
+        set(iface_nets(i)).intersection(reserved_nets), map(lambda i: ndb.interfaces[i.ifname], ndb.interfaces))))
 
 def net_bridge(n):
-    return ipdb.interfaces[client.networks.get(n).attrs['Options'][BRIDGE_OPT]]
+    return ndb.interfaces[client.networks.get(n).attrs['Options'][BRIDGE_OPT]]
 
 @app.route('/NetworkDriver.GetCapabilities', methods=['POST'])
 def net_get_capabilities():
@@ -83,12 +83,12 @@ def create_endpoint():
 
     if_host, if_container = veth_pair(req['EndpointID'])
     logger.info(f'creating veth pair {if_host} <=> {if_container}')
-    if_host = (ipdb.create(ifname=if_host, kind='veth', peer=if_container)
-                .up()
+    if_host = (ndb.interfaces.create(ifname=if_host, kind='veth', peer=if_container)
+                .set('state', 'up')
                 .commit())
 
-    if_container = (ipdb.interfaces[if_container]
-                    .up()
+    if_container = (ndb.interfaces[if_container]
+                    .set('state', 'up')
                     .commit())
     res_iface = {
         'MacAddress': '',
@@ -98,10 +98,11 @@ def create_endpoint():
 
     try:
         if 'MacAddress' in req_iface and req_iface['MacAddress']:
-            if_container.address = req_iface['MacAddress']
-            if_container.commit()
+            (if_container
+                .set('address', req_iface['MacAddress'])
+                .commit())
         else:
-            res_iface['MacAddress'] = if_container.address
+            res_iface['MacAddress'] = if_container['address']
 
         def try_addr(type_):
             k = 'AddressIPv6' if type_ == 'v6' else 'Address'
@@ -110,18 +111,18 @@ def create_endpoint():
                 net = None
                 for addr in bridge_addrs:
                     if a == addr.ip:
-                        raise NetDhcpError(400, f'Address {a} is already in use on bridge {bridge.ifname}')
+                        raise NetDhcpError(400, f'Address {a} is already in use on bridge {bridge["ifname"]}')
                     if a in addr.network:
                         net = addr.network
                 if not net:
-                    raise NetDhcpError(400, f'No suitable network found for {type_} address {a} on bridge {bridge.ifname}')
+                    raise NetDhcpError(400, f'No suitable network found for {type_} address {a} on bridge {bridge["ifname"]}')
 
                 to_add = f'{a}/{net.prefixlen}'
-                logger.info(f'Adding address {a}/{net.prefixlen} to {if_container.ifname}')
+                logger.info(f'Adding address {to_add} to {if_container["ifname"]}')
                 (if_container
                     .add_ip(to_add)
                     .commit())
-            elif type == 'v4':
+            elif type_ == 'v4':
                 raise NetDhcpError(400, f'DHCP{type_} is currently unsupported')
         try_addr('v4')
         try_addr('v6')
@@ -153,13 +154,13 @@ def endpoint_info():
 
     bridge = net_bridge(req['NetworkID'])
     if_host, _if_container = veth_pair(req['EndpointID'])
-    if_host = ipdb.interfaces[if_host]
+    if_host = ndb.interfaces[if_host]
 
     return jsonify({
-        'bridge': bridge,
+        'bridge': bridge['ifname'],
         'if_host': {
-            'name': if_host.ifname,
-            'mac': if_host.address
+            'name': if_host['ifname'],
+            'mac': if_host['address']
         }
     })
 
@@ -169,9 +170,9 @@ def delete_endpoint():
 
     bridge = net_bridge(req['NetworkID'])
     if_host, _if_container = veth_pair(req['EndpointID'])
-    if_host = ipdb.interfaces[if_host]
+    if_host = ndb.interfaces[if_host]
 
-    bridge.del_port(if_host.ifname)
+    bridge.del_port(if_host['ifname'])
     (if_host
         .remove()
         .commit())
@@ -188,28 +189,32 @@ def join():
     res = {
         'InterfaceName': {
             'SrcName': if_container,
-            'DstPrefix': bridge.ifname
+            'DstPrefix': bridge['ifname']
         },
         'StaticRoutes': []
     }
-    # TODO: IPv6 routes
     nonlink = []
-    for route in ipdb.routes:
-        logging.info(route)
-        if route.oif != bridge.index:
+    for route in bridge.routes:
+        # TODO: IPv6 routes
+        if route['type'] != rtypes['RTN_UNICAST'] or route['family'] != socket.AF_INET:
             continue
-        if route.dst == 'default' and 'Gateway' not in res:
-            res['Gateway'] = route.gateway
-        elif route.gateway:
+
+        logging.info(route)
+        if route['dst'] == '' and 'Gateway' not in res:
+            res['Gateway'] = route['gateway']
+            continue
+
+        dst = f'{route["dst"]}/{route["dst_len"]}'
+        if route['gateway']:
             nonlink.append({
-                'Destination': route.dst,
+                'Destination': dst,
                 'RouteType': 0,
-                'NextHop': route.gateway
+                'NextHop': route['gateway']
             })
         else:
             # on-link route
             res['StaticRoutes'].append({
-                'Destination': route.dst,
+                'Destination': dst,
                 'RouteType': 1
             })
     # we need to add the on-link routes first
