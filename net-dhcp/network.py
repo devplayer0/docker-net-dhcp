@@ -181,21 +181,25 @@ def join():
         'StaticRoutes': []
     }
     for route in bridge.routes:
-        # TODO: IPv6 routes
-        if route['type'] != rtypes['RTN_UNICAST'] or route['family'] != socket.AF_INET:
+        if route['type'] != rtypes['RTN_UNICAST']:
             continue
 
-        if route['dst'] == '' and 'Gateway' not in res:
-            res['Gateway'] = route['gateway']
-            continue
+        if route['dst'] == '' or route['dst'] == '/0':
+            if route['family'] == socket.AF_INET and 'Gateway' not in res:
+                logger.info('Adding IPv4 gateway %s', route['gateway'])
+                res['Gateway'] = route['gateway']
+            elif route['family'] == socket.AF_INET6 and 'GatewayIPv6' not in res:
+                logger.info('Adding IPv6 gateway %s', route['gateway'])
+                res['GatewayIPv6'] = route['gateway']
         elif route['gateway']:
+            dst = f'{route["dst"]}/{route["dst_len"]}'
+            logger.info('Adding route to %s via %s', dst, route['gateway'])
             res['StaticRoutes'].append({
-                'Destination': f'{route["dst"]}/{route["dst_len"]}',
+                'Destination': dst,
                 'RouteType': 0,
                 'NextHop': route['gateway']
             })
 
-    logger.info(res)
     return jsonify(res)
 
 @app.route('/NetworkDriver.Leave', methods=['POST'])
