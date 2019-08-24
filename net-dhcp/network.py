@@ -11,8 +11,9 @@ from flask import request, jsonify
 
 from . import NetDhcpError, app
 
-OPTS_KEY = 'com.docker.network.generic' 
-BRIDGE_OPT = 'devplayer0.net-dhcp.bridge'
+OPTS_KEY = 'com.docker.network.generic'
+OPT_PREFIX = 'devplayer0.net-dhcp'
+OPT_BRIDGE = f'{OPT_PREFIX}.bridge'
 
 logger = logging.getLogger('gunicorn.error')
 
@@ -43,7 +44,7 @@ def get_bridges():
         set(iface_nets(i)).intersection(reserved_nets), map(lambda i: ndb.interfaces[i.ifname], ndb.interfaces))))
 
 def net_bridge(n):
-    return ndb.interfaces[client.networks.get(n).attrs['Options'][BRIDGE_OPT]]
+    return ndb.interfaces[client.networks.get(n).attrs['Options'][OPT_BRIDGE]]
 
 @app.route('/NetworkDriver.GetCapabilities', methods=['POST'])
 def net_get_capabilities():
@@ -55,16 +56,13 @@ def net_get_capabilities():
 @app.route('/NetworkDriver.CreateNetwork', methods=['POST'])
 def create_net():
     req = request.get_json(force=True)
-    if BRIDGE_OPT not in req['Options'][OPTS_KEY]:
+    if OPT_BRIDGE not in req['Options'][OPTS_KEY]:
         return jsonify({'Err': 'No bridge provided'}), 400
 
-    desired = req['Options'][OPTS_KEY][BRIDGE_OPT]
+    desired = req['Options'][OPTS_KEY][OPT_BRIDGE]
     bridges = get_bridges()
     if desired not in bridges:
         return jsonify({'Err': f'Bridge "{desired}" not found (or the specified bridge is already used by Docker)'}), 400
-
-    if request.json['IPv6Data']:
-        return jsonify({'Err': 'IPv6 is currently unsupported'}), 400
 
     logger.info('Creating network "%s" (using bridge "%s")', req['NetworkID'], desired)
     return jsonify({})
@@ -101,21 +99,16 @@ def create_endpoint():
             res_iface['MacAddress'] = if_container['address']
 
         def try_addr(type_):
+            addr = None
             k = 'AddressIPv6' if type_ == 'v6' else 'Address'
             if k in req_iface and req_iface[k]:
                 # Just validate the address, Docker will add it to the interface for us
-                a = ipaddress.ip_address(req_iface[k])
-                net = None
-                for addr in bridge_addrs:
-                    if a == addr.ip:
-                        raise NetDhcpError(400, f'Address {a} is already in use on bridge {bridge["ifname"]}')
-                    if a in addr.network:
-                        net = addr.network
-                if not net:
-                    raise NetDhcpError(400, f'No suitable network found for {type_} address {a} on bridge {bridge["ifname"]}')
+                addr = ipaddress.ip_interface(req_iface[k])
+                for bridge_addr in bridge_addrs:
+                    if addr.ip == bridge_addr.ip:
+                        raise NetDhcpError(400, f'Address {addr} is already in use on bridge {bridge["ifname"]}')
 
-                to_add = f'{a}/{net.prefixlen}'
-                logger.info('Adding address %s to %s', to_add, if_container['ifname'])
+                logger.info('Adding address %s to %s', addr, if_container['ifname'])
             elif type_ == 'v4':
                 raise NetDhcpError(400, f'DHCP{type_} is currently unsupported')
         try_addr('v4')
