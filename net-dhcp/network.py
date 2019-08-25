@@ -27,6 +27,17 @@ client = docker.from_env()
 def close_docker():
     client.close()
 
+host_dhcp_clients = {}
+container_dhcp_clients = {}
+@atexit.register
+def cleanup_dhcp():
+    for endpoint, dhcp in host_dhcp_clients.items():
+        logger.warning('cleaning up orphaned host DHCP client (endpoint "%s")', endpoint)
+        dhcp.finish(timeout=1)
+    for endpoint, dhcp in container_dhcp_clients.items():
+        logger.warning('cleaning up orphaned container DHCP client (endpoint "%s")', endpoint)
+        dhcp.finish(timeout=1)
+
 def veth_pair(e):
     return f'dh-{e[:12]}', f'{e[:12]}-dh'
 
@@ -114,10 +125,10 @@ def create_endpoint():
                     if addr.ip == bridge_addr.ip:
                         raise NetDhcpError(400, f'Address {addr} is already in use on bridge {bridge["ifname"]}')
             elif type_ == 'v4':
-                dhcp = udhcpc.DHCPClient(if_container['ifname'], once=True)
-                dhcp.finish()
-                addr = dhcp.ip
+                dhcp = udhcpc.DHCPClient(if_container['ifname'])
+                addr = dhcp.await_ip(timeout=10)
                 res_iface['Address'] = str(addr)
+                host_dhcp_clients[req['EndpointID']] = dhcp
             else:
                 raise NetDhcpError(400, f'DHCPv6 is currently unsupported')
             logger.info('Adding address %s to %s', addr, if_container['ifname'])
@@ -180,6 +191,7 @@ def delete_endpoint():
 @app.route('/NetworkDriver.Join', methods=['POST'])
 def join():
     req = request.get_json(force=True)
+    endpoint = req['EndpointID']
 
     bridge = net_bridge(req['NetworkID'])
     _if_host, if_container = veth_pair(req['EndpointID'])
@@ -191,6 +203,13 @@ def join():
         },
         'StaticRoutes': []
     }
+    if endpoint in host_dhcp_clients:
+        dhcp = host_dhcp_clients[endpoint]
+        logger.info('Setting IPv4 gateway from DHCP (%s)', dhcp.gateway)
+        res['Gateway'] = str(dhcp.gateway)
+        dhcp.finish(timeout=1)
+        del host_dhcp_clients[endpoint]
+
     ipv6 = ipv6_enabled(req['NetworkID'])
     for route in bridge.routes:
         if route['type'] != rtypes['RTN_UNICAST'] or (route['family'] == socket.AF_INET6 and not ipv6):

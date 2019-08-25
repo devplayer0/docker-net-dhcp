@@ -1,6 +1,7 @@
 from enum import Enum
 import ipaddress
 from os import path
+import time
 import threading
 import subprocess
 import logging
@@ -9,6 +10,7 @@ from pyroute2.netns.process.proxy import NSPopen
 
 INFO_PREFIX = '__info'
 HANDLER_SCRIPT = path.join(path.dirname(__file__), 'udhcpc_handler.py')
+AWAIT_INTERVAL = 0.1
 
 class EventType(Enum):
     BOUND = 'bound'
@@ -62,12 +64,22 @@ class DHCPClient:
             logger.debug('[udhcp event] %s %s %s %s', event_type, self.ip, self.gateway, self.domain)
             self.event_listener(event_type, self.ip, self.gateway, self.domain)
 
-    def finish(self):
+    def await_ip(self, timeout=5):
+        # TODO: this bad
+        waited = 0
+        while not self.ip:
+            if waited >= timeout:
+                raise DHCPClientError('Timed out waiting for dhcp lease')
+            time.sleep(AWAIT_INTERVAL)
+            waited += AWAIT_INTERVAL
+        return self.ip
+
+    def finish(self, timeout=5):
         if not self.once:
             self.proc.terminate()
-        if self.proc.wait(timeout=10) != 0:
+        if self.proc.wait(timeout=timeout) != 0:
             raise DHCPClientError(f'udhcpc exited with non-zero exit code {self.proc.returncode}')
         self._event_thread.join()
 
         if self.once and not self.ip:
-            raise DHCPClientError(f'failed to obtain lease')
+            raise DHCPClientError(f'Timed out waiting for dhcp lease')
