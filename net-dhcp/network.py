@@ -9,7 +9,7 @@ from pyroute2.netlink.rtnl import rtypes
 import docker
 from flask import request, jsonify
 
-from . import NetDhcpError, app
+from . import NetDhcpError, udhcpc, app
 
 OPTS_KEY = 'com.docker.network.generic'
 OPT_PREFIX = 'devplayer0.net-dhcp'
@@ -45,6 +45,8 @@ def get_bridges():
 
 def net_bridge(n):
     return ndb.interfaces[client.networks.get(n).attrs['Options'][OPT_BRIDGE]]
+def ipv6_enabled(n):
+    return client.networks.get(n).attrs['EnableIPv6']
 
 @app.route('/NetworkDriver.GetCapabilities', methods=['POST'])
 def net_get_capabilities():
@@ -88,6 +90,10 @@ def create_endpoint():
     if_container = (ndb.interfaces[if_container]
                     .set('state', 'up')
                     .commit())
+    (bridge
+        .add_port(if_host)
+        .commit())
+
     res_iface = {
         'MacAddress': '',
         'Address': '',
@@ -107,31 +113,36 @@ def create_endpoint():
                 for bridge_addr in bridge_addrs:
                     if addr.ip == bridge_addr.ip:
                         raise NetDhcpError(400, f'Address {addr} is already in use on bridge {bridge["ifname"]}')
-
-                logger.info('Adding address %s to %s', addr, if_container['ifname'])
             elif type_ == 'v4':
-                raise NetDhcpError(400, f'DHCP{type_} is currently unsupported')
-        try_addr('v4')
-        try_addr('v6')
+                dhcp = udhcpc.DHCPClient(if_container['ifname'], once=True)
+                dhcp.finish()
+                addr = dhcp.ip
+                res_iface['Address'] = str(addr)
+            else:
+                raise NetDhcpError(400, f'DHCPv6 is currently unsupported')
+            logger.info('Adding address %s to %s', addr, if_container['ifname'])
 
-        (bridge
-            .add_port(if_host)
-            .commit())
+        try_addr('v4')
+        if ipv6_enabled(req['NetworkID']):
+            try_addr('v6')
 
         res = jsonify({
             'Interface': res_iface
         })
-    except NetDhcpError as e:
-        (if_host
-            .remove()
-            .commit())
-        logger.error(e)
-        res = jsonify({'Err': str(e)}), e.status
     except Exception as e:
+        logger.exception(e)
+
+        (bridge
+            .del_port(if_host)
+            .commit())
         (if_host
             .remove()
             .commit())
-        res = jsonify({'Err': str(e)}), 500
+
+        if isinstance(e, NetDhcpError):
+            res = jsonify({'Err': str(e)}), e.status
+        else:
+            res = jsonify({'Err': str(e)}), 500
     finally:
         return res
 
@@ -180,8 +191,9 @@ def join():
         },
         'StaticRoutes': []
     }
+    ipv6 = ipv6_enabled(req['NetworkID'])
     for route in bridge.routes:
-        if route['type'] != rtypes['RTN_UNICAST']:
+        if route['type'] != rtypes['RTN_UNICAST'] or (route['family'] == socket.AF_INET6 and not ipv6):
             continue
 
         if route['dst'] == '' or route['dst'] == '/0':

@@ -28,7 +28,8 @@ create:
 
 debug:
 	@docker run --rm -ti --cap-add CAP_SYS_ADMIN --network host --volume /run/docker/plugins:/run/docker/plugins \
-		--volume /run/docker.sock:/run/docker.sock ${PLUGIN_NAME}:rootfs
+		--volume /run/docker.sock:/run/docker.sock --volume /var/run/docker/netns:/var/run/docker/netns \
+		${PLUGIN_NAME}:rootfs
 
 enable:
 	@echo "### enable plugin ${PLUGIN_NAME}:${PLUGIN_TAG}"		
