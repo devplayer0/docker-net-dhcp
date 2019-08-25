@@ -19,19 +19,13 @@
             "options": [
                 "bind"
             ]
-        },
-        {
-            "source": "/var/run/docker/netns",
-            "destination": "/var/run/docker/netns",
-            "type": "bind",
-            "options": [
-                "bind"
-            ]
         }
     ],
+    "pidhost": true,
     "linux": {
         "capabilities": [
-            "CAP_NET_ADMIN"
+            "CAP_NET_ADMIN",
+            "CAP_SYS_ADMIN"
         ]
     },
     "env": [
