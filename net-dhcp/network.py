@@ -222,10 +222,11 @@ def join():
 
     ipv6 = ipv6_enabled(req['NetworkID'])
     for route in bridge.routes:
-        if route['type'] != rtypes['RTN_UNICAST'] or (route['family'] == socket.AF_INET6 and not ipv6):
+        if route['type'] != rtypes['RTN_UNICAST'] or \
+            (route['family'] == socket.AF_INET6 and not ipv6):
             continue
 
-        if route['dst'] == '' or route['dst'] == '/0':
+        if route['dst'] in ('', '/0'):
             if route['family'] == socket.AF_INET and 'Gateway' not in res:
                 logger.info('Adding IPv4 gateway %s', route['gateway'])
                 res['Gateway'] = route['gateway']
@@ -253,15 +254,38 @@ class ContainerDHCPManager:
     def __init__(self, network, endpoint):
         self.network = network
         self.endpoint = endpoint
+        self.ipv6 = ipv6_enabled(network)
 
         self._thread = threading.Thread(target=self.run)
         self._thread.start()
+
+    def _on_event(self, dhcp, event_type, _args):
+        if event_type != udhcpc.EventType.RENEW:
+            return
+
+        for route in dhcp.iface.routes:
+            if route['type'] != rtypes['RTN_UNICAST'] or \
+                (route['family'] == socket.AF_INET6 and not self.ipv6) or \
+                route['dst'] not in ('', '/0'):
+                continue
+
+            # Needed because Route.remove() doesn't like a blank destination
+            logger.info('Removing default route via %s', route['gateway'])
+            route['dst'] = '::' if route['family'] == socket.AF_INET6 else '0.0.0.0'
+            (route
+                .remove()
+                .commit())
+
+        logger.info('Adding default route via %s', dhcp.gateway)
+        (dhcp.iface.routes.add({'gateway': dhcp.gateway})
+            .commit())
 
     def run(self):
         iface = endpoint_container_iface(self.network, self.endpoint)
         self.dhcp = udhcpc.DHCPClient(iface)
         logger.info('Starting DHCP client on %s in container namespace %s', iface['ifname'], \
             self.dhcp.netns)
+
     def stop(self):
         logger.info('Shutting down DHCP client on %s in container namespace %s', \
             self.dhcp.iface['ifname'], self.dhcp.netns)

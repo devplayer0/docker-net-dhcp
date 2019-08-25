@@ -2,15 +2,15 @@ from enum import Enum
 import ipaddress
 import os
 from os import path
-import fcntl
-import time
+from select import select
 import threading
 import subprocess
 import logging
 
+from eventfd import EventFD
+import posix_ipc
 from pyroute2.netns.process.proxy import NSPopen
 
-EVENT_PREFIX = '__event'
 HANDLER_SCRIPT = path.join(path.dirname(__file__), 'udhcpc_handler.py')
 AWAIT_INTERVAL = 0.1
 
@@ -26,13 +26,7 @@ class DHCPClientError(Exception):
     pass
 
 def _nspopen_wrapper(netns):
-    def _wrapper(*args, **kwargs):
-        # We have to set O_NONBLOCK on stdout since NSPopen uses a global lock
-        # on the object (e.g. deadlock if we try to readline() and terminate())
-        proc = NSPopen(netns, *args, **kwargs)
-        proc.stdout.fcntl(fcntl.F_SETFL, os.O_NONBLOCK)
-        return proc
-    return _wrapper
+    return lambda *args, **kwargs: NSPopen(netns, *args, **kwargs)
 class DHCPClient:
     def __init__(self, iface, once=False, event_listener=None):
         self.iface = iface
@@ -49,14 +43,17 @@ class DHCPClient:
         Popen = _nspopen_wrapper(self.netns) if self.netns else subprocess.Popen
         cmdline = ['/sbin/udhcpc', '-s', HANDLER_SCRIPT, '-i', iface['ifname'], '-f']
         cmdline.append('-q' if once else '-R')
-        self.proc = Popen(cmdline, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, encoding='utf-8')
+
+        self._event_queue = posix_ipc.MessageQueue(f'/udhcpc_{iface["address"].replace(":", "_")}', \
+            flags=os.O_CREAT | os.O_EXCL)
+        self.proc = Popen(cmdline, env={'EVENT_QUEUE': self._event_queue.name})
 
         self._has_lease = threading.Event()
         self.ip = None
         self.gateway = None
         self.domain = None
 
-        self._running = True
+        self._shutdown_event = EventFD()
         self._event_thread = threading.Thread(target=self._read_events)
         self._event_thread.start()
 
@@ -73,21 +70,13 @@ class DHCPClient:
             self.domain = None
 
     def _read_events(self):
-        while self._running:
-            line = self.proc.stdout.readline().strip()
-            if not line:
-                # stdout will be O_NONBLOCK if udhcpc is in a netns
-                # We can't use select() since the file descriptor is from
-                # the NSPopen proxy
-                if self.netns and self._running:
-                    time.sleep(0.1)
-                continue
+        while True:
+            r, _w, _e = select([self._shutdown_event, self._event_queue.mqd], [], [])
+            if self._shutdown_event in r:
+                break
 
-            if not line.startswith(EVENT_PREFIX):
-                logger.debug('[udhcpc#%d] %s', self.proc.pid, line)
-                continue
-
-            args = line.split(' ')[1:]
+            msg, _priority = self._event_queue.receive()
+            args = msg.decode('utf-8').split(' ')
             try:
                 event_type = EventType(args[0])
             except ValueError:
@@ -114,7 +103,10 @@ class DHCPClient:
             raise DHCPClientError(f'udhcpc exited with non-zero exit code {self.proc.returncode}')
         if self.netns:
             self.proc.release()
-        self._running = False
+
+        self._shutdown_event.set()
         self._event_thread.join()
+        self._event_queue.close()
+        self._event_queue.unlink()
 
         return self.ip

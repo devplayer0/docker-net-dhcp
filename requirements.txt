@@ -2,3 +2,5 @@ flask==1.1.1
 gunicorn==19.9.0
 pyroute2==0.5.6
 docker==4.0.2
+eventfd==0.2
+posix_ipc==1.0.4
