@@ -34,7 +34,7 @@ container_dhcp_clients = {}
 def cleanup_dhcp():
     for endpoint, dhcp in container_dhcp_clients.items():
         logger.warning('cleaning up orphaned container DHCP client (endpoint "%s")', endpoint)
-        dhcp.finish(timeout=1)
+        dhcp.stop()
 
 def veth_pair(e):
     return f'dh-{e[:12]}', f'{e[:12]}-dh'
@@ -247,23 +247,36 @@ def join():
 def leave():
     return jsonify({})
 
+# Trying to grab the container's attributes (to get the network namespace)
+# will deadlock, so we must defer starting the DHCP client
+class ContainerDHCPManager:
+    def __init__(self, network, endpoint):
+        self.network = network
+        self.endpoint = endpoint
+
+        self._thread = threading.Thread(target=self.run)
+        self._thread.start()
+
+    def run(self):
+        iface = endpoint_container_iface(self.network, self.endpoint)
+        self.dhcp = udhcpc.DHCPClient(iface)
+        logger.info('Starting DHCP client on %s in container namespace %s', iface['ifname'], \
+            self.dhcp.netns)
+    def stop(self):
+        logger.info('Shutting down DHCP client on %s in container namespace %s', \
+            self.dhcp.iface['ifname'], self.dhcp.netns)
+        self.dhcp.finish(timeout=1)
+        ndb.sources.remove(self.dhcp.netns)
+        self._thread.join()
+
 # ProgramExternalActivity is supposed to be used for port forwarding etc.,
 # but we can use it to start the DHCP client in the container's network namespace
-# since the interface will have been moved inside at this point. Trying to grab
-# the contaienr's attributes (to get the network namespace) will deadlock, so
-# we must defer starting the DHCP client
+# since the interface will have been moved inside at this point.
 @app.route('/NetworkDriver.ProgramExternalConnectivity', methods=['POST'])
 def start_container_dhcp():
     req = request.get_json(force=True)
     endpoint = req['EndpointID']
-
-    def _deferred():
-        iface = endpoint_container_iface(req['NetworkID'], endpoint)
-
-        dhcp = udhcpc.DHCPClient(iface)
-        container_dhcp_clients[endpoint] = dhcp
-        logger.info('Starting DHCP client on %s in container namespace %s', iface['ifname'], dhcp.netns)
-    threading.Thread(target=_deferred).start()
+    container_dhcp_clients[endpoint] = ContainerDHCPManager(req['NetworkID'], endpoint)
 
     return jsonify({})
 
@@ -273,10 +286,7 @@ def stop_container_dhcp():
     endpoint = req['EndpointID']
 
     if endpoint in container_dhcp_clients:
-        dhcp = container_dhcp_clients[endpoint]
-        logger.info('Shutting down DHCP client on %s in container namespace %s', dhcp.iface['ifname'], dhcp.netns)
-        dhcp.finish(timeout=1)
-        ndb.sources.remove(dhcp.netns)
+        container_dhcp_clients[endpoint].stop()
         del container_dhcp_clients[endpoint]
 
     return jsonify({})

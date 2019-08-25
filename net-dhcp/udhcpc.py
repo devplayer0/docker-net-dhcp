@@ -6,18 +6,19 @@ import fcntl
 import time
 import threading
 import subprocess
-import signal
 import logging
 
 from pyroute2.netns.process.proxy import NSPopen
 
-INFO_PREFIX = '__info'
+EVENT_PREFIX = '__event'
 HANDLER_SCRIPT = path.join(path.dirname(__file__), 'udhcpc_handler.py')
 AWAIT_INTERVAL = 0.1
 
 class EventType(Enum):
     BOUND = 'bound'
     RENEW = 'renew'
+    DECONFIG = 'deconfig'
+    LEASEFAIL = 'leasefail'
 
 logger = logging.getLogger('gunicorn.error')
 
@@ -50,6 +51,7 @@ class DHCPClient:
         cmdline.append('-q' if once else '-R')
         self.proc = Popen(cmdline, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, encoding='utf-8')
 
+        self._has_lease = threading.Event()
         self.ip = None
         self.gateway = None
         self.domain = None
@@ -59,23 +61,29 @@ class DHCPClient:
         self._event_thread.start()
 
     def _attr_listener(self, event_type, args):
-        if event_type not in (EventType.BOUND, EventType.RENEW):
-            return
-
-        self.ip = ipaddress.ip_interface(args[0])
-        self.gateway = ipaddress.ip_address(args[1])
-        self.domain = args[2]
+        if event_type in (EventType.BOUND, EventType.RENEW):
+            self.ip = ipaddress.ip_interface(args[0])
+            self.gateway = ipaddress.ip_address(args[1])
+            self.domain = args[2]
+            self._has_lease.set()
+        elif event_type == EventType.DECONFIG:
+            self._has_lease.clear()
+            self.ip = None
+            self.gateway = None
+            self.domain = None
 
     def _read_events(self):
         while self._running:
             line = self.proc.stdout.readline().strip()
             if not line:
                 # stdout will be O_NONBLOCK if udhcpc is in a netns
+                # We can't use select() since the file descriptor is from
+                # the NSPopen proxy
                 if self.netns and self._running:
                     time.sleep(0.1)
                 continue
 
-            if not line.startswith(INFO_PREFIX):
+            if not line.startswith(EVENT_PREFIX):
                 logger.debug('[udhcpc#%d] %s', self.proc.pid, line)
                 continue
 
@@ -91,12 +99,9 @@ class DHCPClient:
                 listener(self, event_type, args[1:])
 
     def await_ip(self, timeout=5):
-        # TODO: this bad
-        start = time.time()
-        while not self.ip:
-            if time.time() - start > timeout:
-                raise DHCPClientError('Timed out waiting for dhcp lease')
-            time.sleep(AWAIT_INTERVAL)
+        if not self._has_lease.wait(timeout=timeout):
+            raise DHCPClientError('Timed out waiting for dhcp lease')
+
         return self.ip
 
     def finish(self, timeout=5):
