@@ -91,6 +91,12 @@ def await_endpoint_container_iface(n, e, timeout=5):
         raise NetDhcpError('Timed out waiting for container to become availabile')
     return iface
 
+def endpoint_container_name(n, e):
+    for info in client.networks.get(n).attrs['Containers'].values():
+        if info['EndpointID'] == e:
+            return info['Name']
+    return None
+
 @app.route('/NetworkDriver.GetCapabilities', methods=['POST'])
 def net_get_capabilities():
     return jsonify({
@@ -340,13 +346,14 @@ class ContainerDHCPManager:
     def run(self):
         try:
             iface = await_endpoint_container_iface(self.network, self.endpoint)
+            hostname = endpoint_container_name(self.network, self.endpoint)
 
-            self.dhcp = udhcpc.DHCPClient(iface, event_listener=self._on_event)
+            self.dhcp = udhcpc.DHCPClient(iface, event_listener=self._on_event, hostname=hostname)
             logger.info('Starting DHCPv4 client on %s in container namespace %s', iface['ifname'], \
                 self.dhcp.netns)
 
             if self.ipv6:
-                self.dhcp6 = udhcpc.DHCPClient(iface, v6=True, event_listener=self._on_event)
+                self.dhcp6 = udhcpc.DHCPClient(iface, v6=True, event_listener=self._on_event, hostname=hostname)
                 logger.info('Starting DHCPv6 client on %s in container namespace %s', iface['ifname'], \
                     self.dhcp6.netns)
         except Exception as e:

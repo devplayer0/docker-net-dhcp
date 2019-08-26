@@ -1,6 +1,8 @@
 from enum import Enum
 import ipaddress
 import json
+import struct
+import binascii
 import os
 from os import path
 from select import select
@@ -30,7 +32,7 @@ class DHCPClientError(Exception):
 def _nspopen_wrapper(netns):
     return lambda *args, **kwargs: NSPopen(netns, *args, **kwargs)
 class DHCPClient:
-    def __init__(self, iface, v6=False, once=False, event_listener=None):
+    def __init__(self, iface, v6=False, once=False, hostname=None, event_listener=None):
         self.iface = iface
         self.v6 = v6
         self.once = once
@@ -47,6 +49,18 @@ class DHCPClient:
         bin_path = '/usr/bin/udhcpc6' if v6 else '/sbin/udhcpc'
         cmdline = [bin_path, '-s', HANDLER_SCRIPT, '-i', iface['ifname'], '-f']
         cmdline.append('-q' if once else '-R')
+        if hostname:
+            cmdline.append('-x')
+            if v6:
+                # TODO: We encode the fqdn for DHCPv6 because udhcpc6 seems to be broken
+                # flags: S bit set (see RFC4704)
+                enc_hostname = hostname.encode('utf-8')
+                enc_hostname = struct.pack('BB', 0b0001, len(enc_hostname)) + enc_hostname
+                enc_hostname = binascii.hexlify(enc_hostname).decode('ascii')
+                hostname_opt = f'0x27:{enc_hostname}'
+            else:
+                hostname_opt = f'hostname:{hostname}'
+            cmdline.append(hostname_opt)
         if not v6:
             cmdline += ['-V', VENDOR_ID]
 
@@ -54,6 +68,8 @@ class DHCPClient:
         self._event_queue = posix_ipc.MessageQueue(f'/udhcpc{self._suffix}_{iface["address"].replace(":", "_")}', \
             flags=os.O_CREAT | os.O_EXCL)
         self.proc = Popen(cmdline, env={'EVENT_QUEUE': self._event_queue.name})
+        if hostname:
+            logger.debug('[udhcpc%s#%d] using hostname "%s"', self._suffix, self.proc.pid, hostname)
 
         self._has_lease = threading.Event()
         self.ip = None
@@ -110,7 +126,7 @@ class DHCPClient:
         if self._shutdown_event.is_set():
             return
 
-        if self.proc.returncode != None and (not self.once or self.proc.returncode != 0):
+        if self.proc.returncode is not None and (not self.once or self.proc.returncode != 0):
             raise DHCPClientError(f'udhcpc{self._suffix} exited early with code {self.proc.returncode}')
         if self.once:
             self.await_ip()
