@@ -11,7 +11,7 @@ if __name__ != '__main__':
 
 event = {'type': sys.argv[1]}
 if event['type'] in ('bound', 'renew'):
-    event['ip'] = env['ip']
+    event['ip'] = f'{env["ip"]}/{env["mask"]}'
     if 'router' in env:
         event['router'] = env['router']
     if 'domain' in env:

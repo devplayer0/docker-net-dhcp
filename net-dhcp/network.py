@@ -214,7 +214,7 @@ def join():
         },
         'StaticRoutes': []
     }
-    if endpoint in gateway_hints:
+    if endpoint in gateway_hints and gateway_hints[endpoint]:
         gateway = gateway_hints[endpoint]
         logger.info('Setting IPv4 gateway from DHCP (%s)', gateway)
         res['Gateway'] = str(gateway)
