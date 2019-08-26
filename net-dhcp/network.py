@@ -15,9 +15,8 @@ from flask import request, jsonify
 from . import NetDhcpError, udhcpc, app
 
 OPTS_KEY = 'com.docker.network.generic'
-OPT_PREFIX = 'devplayer0.net-dhcp'
-OPT_BRIDGE = f'{OPT_PREFIX}.bridge'
-OPT_IPV6 = f'{OPT_PREFIX}.ipv6'
+OPT_BRIDGE = 'bridge'
+OPT_IPV6 = 'ipv6'
 
 logger = logging.getLogger('gunicorn.error')
 
