@@ -1,5 +1,6 @@
 from enum import Enum
 import ipaddress
+import json
 import os
 from os import path
 from select import select
@@ -57,11 +58,14 @@ class DHCPClient:
         self._event_thread = threading.Thread(target=self._read_events)
         self._event_thread.start()
 
-    def _attr_listener(self, event_type, args):
+    def _attr_listener(self, event_type, event):
         if event_type in (EventType.BOUND, EventType.RENEW):
-            self.ip = ipaddress.ip_interface(args[0])
-            self.gateway = ipaddress.ip_address(args[1])
-            self.domain = args[2]
+            self.ip = ipaddress.ip_interface(event['ip'])
+            if 'gateway' in event:
+                self.gateway = ipaddress.ip_address(event['gateway'])
+            else:
+                self.gateway = None
+            self.domain = event.get('domain')
             self._has_lease.set()
         elif event_type == EventType.DECONFIG:
             self._has_lease.clear()
@@ -76,24 +80,32 @@ class DHCPClient:
                 break
 
             msg, _priority = self._event_queue.receive()
-            args = msg.decode('utf-8').split(' ')
+            event = json.loads(msg.decode('utf-8'))
             try:
-                event_type = EventType(args[0])
+                event['type'] = EventType(event['type'])
             except ValueError:
-                logger.warning('udhcpc#%d unknown event "%s"', self.proc.pid, args)
+                logger.warning('udhcpc#%d unknown event "%s"', self.proc.pid, event)
                 continue
 
-            logger.debug('[udhcp#%d event] %s %s', self.proc.pid, event_type, args[1:])
+            logger.debug('[udhcp#%d event] %s', self.proc.pid, event)
             for listener in self.event_listeners:
-                listener(self, event_type, args[1:])
+                try:
+                    listener(self, event['type'], event)
+                except Exception as ex:
+                    logger.exception(ex)
 
-    def await_ip(self, timeout=5):
+    def await_ip(self, timeout=10):
         if not self._has_lease.wait(timeout=timeout):
             raise DHCPClientError('Timed out waiting for dhcp lease')
 
         return self.ip
 
     def finish(self, timeout=5):
+        if self._shutdown_event.is_set():
+            return
+
+        if self.proc.returncode != None and (not self.once or self.proc.returncode != 0):
+            raise DHCPClientError(f'udhcpc exited early with code {self.proc.returncode}')
         if self.once:
             self.await_ip()
         else:

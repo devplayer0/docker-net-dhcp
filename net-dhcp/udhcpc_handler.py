@@ -1,4 +1,5 @@
 #!/usr/bin/env python
+import json
 import sys
 from os import environ as env
 
@@ -8,17 +9,18 @@ if __name__ != '__main__':
     print('You shouldn\'t be importing this script!')
     sys.exit(1)
 
-event_type = sys.argv[1]
-if event_type in ('bound', 'renew'):
-    event = f'{event_type} {env["ip"]}/{env["mask"]} {env["router"]} {env["domain"]}'
-elif event_type in ('deconfig', 'leasefail', 'nak'):
-    event = event_type
+event = {'type': sys.argv[1]}
+if event['type'] in ('bound', 'renew'):
+    event['ip'] = env['ip']
+    if 'router' in env:
+        event['router'] = env['router']
+    if 'domain' in env:
+        event['domain'] = env['domain']
+elif event['type'] in ('deconfig', 'leasefail', 'nak'):
+    pass
 else:
-    print(f'unknown udhcpc event "{event_type}"')
-    sys.exit(1)
+    event['type'] = 'unknown'
 
-#with open(env['EVENT_FILE'], 'a') as event_file:
-#    event_file.write(event + '\n')
 queue = posix_ipc.MessageQueue(env['EVENT_QUEUE'])
-queue.send(event)
+queue.send(json.dumps(event))
 queue.close()
