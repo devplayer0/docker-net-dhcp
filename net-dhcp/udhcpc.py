@@ -29,8 +29,9 @@ class DHCPClientError(Exception):
 def _nspopen_wrapper(netns):
     return lambda *args, **kwargs: NSPopen(netns, *args, **kwargs)
 class DHCPClient:
-    def __init__(self, iface, once=False, event_listener=None):
+    def __init__(self, iface, v6=False, once=False, event_listener=None):
         self.iface = iface
+        self.v6 = v6
         self.once = once
         self.event_listeners = [DHCPClient._attr_listener]
         if event_listener:
@@ -42,10 +43,12 @@ class DHCPClient:
             logger.debug('udhcpc using netns %s', self.netns)
 
         Popen = _nspopen_wrapper(self.netns) if self.netns else subprocess.Popen
-        cmdline = ['/sbin/udhcpc', '-s', HANDLER_SCRIPT, '-i', iface['ifname'], '-f']
+        bin_path = '/usr/bin/udhcpc6' if v6 else '/sbin/udhcpc'
+        cmdline = [bin_path, '-s', HANDLER_SCRIPT, '-i', iface['ifname'], '-f']
         cmdline.append('-q' if once else '-R')
 
-        self._event_queue = posix_ipc.MessageQueue(f'/udhcpc_{iface["address"].replace(":", "_")}', \
+        self._suffix = '6' if v6 else ''
+        self._event_queue = posix_ipc.MessageQueue(f'/udhcpc{self._suffix}_{iface["address"].replace(":", "_")}', \
             flags=os.O_CREAT | os.O_EXCL)
         self.proc = Popen(cmdline, env={'EVENT_QUEUE': self._event_queue.name})
 
@@ -84,10 +87,10 @@ class DHCPClient:
             try:
                 event['type'] = EventType(event['type'])
             except ValueError:
-                logger.warning('udhcpc#%d unknown event "%s"', self.proc.pid, event)
+                logger.warning('udhcpc%s#%d unknown event "%s"', self._suffix, self.proc.pid, event)
                 continue
 
-            logger.debug('[udhcp#%d event] %s', self.proc.pid, event)
+            logger.debug('[udhcp%s#%d event] %s', self._suffix, self.proc.pid, event)
             for listener in self.event_listeners:
                 try:
                     listener(self, event['type'], event)
@@ -96,7 +99,7 @@ class DHCPClient:
 
     def await_ip(self, timeout=10):
         if not self._has_lease.wait(timeout=timeout):
-            raise DHCPClientError('Timed out waiting for dhcp lease')
+            raise DHCPClientError(f'Timed out waiting for lease from udhcpc{self._suffix}')
 
         return self.ip
 
@@ -105,14 +108,14 @@ class DHCPClient:
             return
 
         if self.proc.returncode != None and (not self.once or self.proc.returncode != 0):
-            raise DHCPClientError(f'udhcpc exited early with code {self.proc.returncode}')
+            raise DHCPClientError(f'udhcpc{self._suffix} exited early with code {self.proc.returncode}')
         if self.once:
             self.await_ip()
         else:
             self.proc.terminate()
 
         if self.proc.wait(timeout=timeout) != 0:
-            raise DHCPClientError(f'udhcpc exited with non-zero exit code {self.proc.returncode}')
+            raise DHCPClientError(f'udhcpc{self._suffix} exited with non-zero exit code {self.proc.returncode}')
         if self.netns:
             self.proc.release()
 

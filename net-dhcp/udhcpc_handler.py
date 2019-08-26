@@ -11,11 +11,14 @@ if __name__ != '__main__':
 
 event = {'type': sys.argv[1]}
 if event['type'] in ('bound', 'renew'):
-    event['ip'] = f'{env["ip"]}/{env["mask"]}'
-    if 'router' in env:
-        event['gateway'] = env['router']
-    if 'domain' in env:
-        event['domain'] = env['domain']
+    if 'ipv6' in env:
+        event['ip'] = env['ipv6']
+    else:
+        event['ip'] = f'{env["ip"]}/{env["mask"]}'
+        if 'router' in env:
+            event['gateway'] = env['router']
+        if 'domain' in env:
+            event['domain'] = env['domain']
 elif event['type'] in ('deconfig', 'leasefail', 'nak'):
     pass
 else:

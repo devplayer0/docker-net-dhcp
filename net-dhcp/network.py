@@ -17,6 +17,7 @@ from . import NetDhcpError, udhcpc, app
 OPTS_KEY = 'com.docker.network.generic'
 OPT_PREFIX = 'devplayer0.net-dhcp'
 OPT_BRIDGE = f'{OPT_PREFIX}.bridge'
+OPT_IPV6 = f'{OPT_PREFIX}.ipv6'
 
 logger = logging.getLogger('gunicorn.error')
 
@@ -57,7 +58,9 @@ def get_bridges():
 def net_bridge(n):
     return ndb.interfaces[client.networks.get(n).attrs['Options'][OPT_BRIDGE]]
 def ipv6_enabled(n):
-    return client.networks.get(n).attrs['EnableIPv6']
+    options = client.networks.get(n).attrs['Options']
+    return OPT_IPV6 in options and options[OPT_IPV6] == 'true'
+
 def endpoint_container_iface(n, e):
     for cid, info in client.networks.get(n).attrs['Containers'].items():
         if info['EndpointID'] == e:
@@ -99,10 +102,15 @@ def net_get_capabilities():
 @app.route('/NetworkDriver.CreateNetwork', methods=['POST'])
 def create_net():
     req = request.get_json(force=True)
-    if OPT_BRIDGE not in req['Options'][OPTS_KEY]:
+    options = req['Options'][OPTS_KEY]
+    if OPT_BRIDGE not in options:
         return jsonify({'Err': 'No bridge provided'}), 400
+    # We have to use a custom "enable IPv6" option because Docker's null IPAM driver doesn't support IPv6 and a plugin
+    # IPAM driver isn't allowed to return an empty address
+    if OPT_IPV6 in options and options[OPT_IPV6] not in ('', 'true', 'false'):
+        return jsonify({'Err': 'Invalid boolean value for ipv6'}), 400
 
-    desired = req['Options'][OPTS_KEY][OPT_BRIDGE]
+    desired = options[OPT_BRIDGE]
     bridges = get_bridges()
     if desired not in bridges:
         return jsonify({'Err': f'Bridge "{desired}" not found (or the specified bridge is already used by Docker)'}), 400
@@ -156,14 +164,16 @@ def create_endpoint():
                 for bridge_addr in bridge_addrs:
                     if addr.ip == bridge_addr.ip:
                         raise NetDhcpError(400, f'Address {addr} is already in use on bridge {bridge["ifname"]}')
-            elif type_ == 'v4':
-                dhcp = udhcpc.DHCPClient(if_container, once=True)
-                addr = dhcp.finish()
-                res_iface['Address'] = str(addr)
-                gateway_hints[endpoint_id] = dhcp.gateway
             else:
-                raise NetDhcpError(400, f'DHCPv6 is currently unsupported')
-            logger.info('Adding address %s to %s', addr, if_container['ifname'])
+                dhcp = udhcpc.DHCPClient(if_container, v6=type_ == 'v6', once=True)
+                addr = dhcp.finish()
+                if not addr:
+                    return
+                res_iface[k] = str(addr)
+
+                if dhcp.gateway:
+                    gateway_hints[endpoint_id] = dhcp.gateway
+            logger.info('Adding IP%s address %s to %s', type_, addr, if_container['ifname'])
 
         try_addr('v4')
         if ipv6_enabled(network_id):
@@ -236,7 +246,8 @@ def join():
         },
         'StaticRoutes': []
     }
-    if endpoint in gateway_hints and gateway_hints[endpoint]:
+
+    if endpoint in gateway_hints:
         gateway = gateway_hints[endpoint]
         logger.info('Setting IPv4 gateway from DHCP (%s)', gateway)
         res['Gateway'] = str(gateway)
@@ -288,6 +299,7 @@ class ContainerDHCPManager:
         self.ipv6 = ipv6_enabled(network)
 
         self.dhcp = None
+        self.dhcp6 = None
         self._thread = threading.Thread(target=self.run)
         self._thread.start()
 
@@ -323,9 +335,15 @@ class ContainerDHCPManager:
     def run(self):
         try:
             iface = await_endpoint_container_iface(self.network, self.endpoint)
+
             self.dhcp = udhcpc.DHCPClient(iface, event_listener=self._on_event)
-            logger.info('Starting DHCP client on %s in container namespace %s', iface['ifname'], \
+            logger.info('Starting DHCPv4 client on %s in container namespace %s', iface['ifname'], \
                 self.dhcp.netns)
+
+            if self.ipv6:
+                self.dhcp6 = udhcpc.DHCPClient(iface, v6=True, event_listener=self._on_event)
+                logger.info('Starting DHCPv6 client on %s in container namespace %s', iface['ifname'], \
+                    self.dhcp6.netns)
         except Exception as e:
             logger.exception(e)
 
@@ -333,8 +351,14 @@ class ContainerDHCPManager:
         if not self.dhcp:
             return
 
-        logger.info('Shutting down DHCP client on %s in container namespace %s', \
+        logger.info('Shutting down DHCPv4 client on %s in container namespace %s', \
             self.dhcp.iface['ifname'], self.dhcp.netns)
         self.dhcp.finish(timeout=1)
+
+        if self.ipv6:
+            logger.info('Shutting down DHCPv6 client on %s in container namespace %s', \
+                self.dhcp6.iface['ifname'], self.dhcp.netns)
+            self.dhcp6.finish(timeout=1)
+
         ndb.sources.remove(self.dhcp.netns)
         self._thread.join()
