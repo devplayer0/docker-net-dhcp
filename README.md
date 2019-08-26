@@ -77,3 +77,27 @@ Note:
  - It will take a bit longer than usual for the container to start, as a DHCP lease needs to be obtained before creating it
  - Once created, a persistent DHCP client will renew the DHCP lease (and then update the default gateway in the
  container) when necessary - **this client runs separately from the container**
+ - Use `--mac-address` to specify a MAC address if you've configured reserved IP addresses on your DHCP server, or if
+ you want a container to re-use an old lease
+
+# Implementation
+Fundamentally, the same mechanism is used by `net-dhcp` as Docker's `bridge` driver to wire up networking to containers.
+That is, a bridge on the host is used as a switch so that containers can communicate with each other - `veth` pairs
+connect each container's network namespace to the bridge.
+
+- While Docker creates and manages its own bridges (and routes and filters traffic), `net-dhcp` uses an existing bridge
+on the host, bridged with the desired local network. 
+- Instead of allocating IP addresses from a static pool stored on the Docker host, `net-dhcp` relies on an external DHCP
+server to provide IP addresses
+
+## Flow
+1. Container creation request is made
+2. A `veth` pair is created and the host end is connected to the bridge (at this point both interfaces are still in the
+host namespace)
+3. A DHCP client (BusyBox `udhcpc`) is started on the container end (still in the host namespace) - initial IP address
+is provided to Docker by the plugin
+4. Docker moves the container end of the `veth` pair into the container's network namespace and sets the IP address - at
+this point `udhcpc` must be stopped
+5. `net-dhcp` starts `udhcpc` on the container end of the `veth` pair in the container's **network namespace** (but
+still in the host / plugin **PID namespace** - this means that the container can't see the DHCP client)
+6. `udhcpc` continues to run, renewing the lease when required, until the container shuts down
