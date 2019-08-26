@@ -3,6 +3,7 @@ import ipaddress
 import logging
 import atexit
 import socket
+import time
 import threading
 
 import pyroute2
@@ -61,12 +62,31 @@ def endpoint_container_iface(n, e):
         if info['EndpointID'] == e:
             container = client.containers.get(cid)
             netns = f'/proc/{container.attrs["State"]["Pid"]}/ns/net'
-            ndb.sources.add(netns=netns)
+
+            already = False
+            for source in ndb.sources:
+                if source == netns:
+                    already = True
+                    break
+            if not already:
+                ndb.sources.add(netns=netns)
+
             for i in ndb.interfaces:
                 if i['address'] == info['MacAddress']:
                     return i
             break
     return None
+def await_endpoint_container_iface(n, e, timeout=5):
+    start = time.time()
+    iface = None
+    while time.time() - start < timeout:
+        try:
+            iface = endpoint_container_iface(n, e)
+        except docker.errors.NotFound:
+            time.sleep(0.5)
+    if not iface:
+        raise NetDhcpError('Timed out waiting for container to become availabile')
+    return iface
 
 @app.route('/NetworkDriver.GetCapabilities', methods=['POST'])
 def net_get_capabilities():
@@ -202,6 +222,7 @@ def delete_endpoint():
 @app.route('/NetworkDriver.Join', methods=['POST'])
 def join():
     req = request.get_json(force=True)
+    network = req['NetworkID']
     endpoint = req['EndpointID']
 
     bridge = net_bridge(req['NetworkID'])
@@ -220,7 +241,7 @@ def join():
         res['Gateway'] = str(gateway)
         del gateway_hints[endpoint]
 
-    ipv6 = ipv6_enabled(req['NetworkID'])
+    ipv6 = ipv6_enabled(network)
     for route in bridge.routes:
         if route['type'] != rtypes['RTN_UNICAST'] or \
             (route['family'] == socket.AF_INET6 and not ipv6):
@@ -242,24 +263,34 @@ def join():
                 'NextHop': route['gateway']
             })
 
+    container_dhcp_clients[endpoint] = ContainerDHCPManager(network, endpoint)
     return jsonify(res)
 
 @app.route('/NetworkDriver.Leave', methods=['POST'])
 def leave():
+    req = request.get_json(force=True)
+    endpoint = req['EndpointID']
+
+    if endpoint in container_dhcp_clients:
+        container_dhcp_clients[endpoint].stop()
+        del container_dhcp_clients[endpoint]
+
     return jsonify({})
 
 # Trying to grab the container's attributes (to get the network namespace)
-# will deadlock, so we must defer starting the DHCP client
+# will deadlock (since Docker is waiting on us), so we must defer starting
+# the DHCP client
 class ContainerDHCPManager:
     def __init__(self, network, endpoint):
         self.network = network
         self.endpoint = endpoint
         self.ipv6 = ipv6_enabled(network)
 
+        self.dhcp = None
         self._thread = threading.Thread(target=self.run)
         self._thread.start()
 
-    def _on_event(self, dhcp, event_type, _args):
+    def _on_event(self, dhcp, event_type, _event):
         if event_type != udhcpc.EventType.RENEW:
             return
 
@@ -281,36 +312,20 @@ class ContainerDHCPManager:
             .commit())
 
     def run(self):
-        iface = endpoint_container_iface(self.network, self.endpoint)
-        self.dhcp = udhcpc.DHCPClient(iface)
-        logger.info('Starting DHCP client on %s in container namespace %s', iface['ifname'], \
-            self.dhcp.netns)
+        try:
+            iface = await_endpoint_container_iface(self.network, self.endpoint)
+            self.dhcp = udhcpc.DHCPClient(iface, event_listener=self._on_event)
+            logger.info('Starting DHCP client on %s in container namespace %s', iface['ifname'], \
+                self.dhcp.netns)
+        except Exception as e:
+            logger.exception(e)
 
     def stop(self):
+        if not self.dhcp:
+            return
+
         logger.info('Shutting down DHCP client on %s in container namespace %s', \
             self.dhcp.iface['ifname'], self.dhcp.netns)
         self.dhcp.finish(timeout=1)
         ndb.sources.remove(self.dhcp.netns)
         self._thread.join()
-
-# ProgramExternalActivity is supposed to be used for port forwarding etc.,
-# but we can use it to start the DHCP client in the container's network namespace
-# since the interface will have been moved inside at this point.
-@app.route('/NetworkDriver.ProgramExternalConnectivity', methods=['POST'])
-def start_container_dhcp():
-    req = request.get_json(force=True)
-    endpoint = req['EndpointID']
-    container_dhcp_clients[endpoint] = ContainerDHCPManager(req['NetworkID'], endpoint)
-
-    return jsonify({})
-
-@app.route('/NetworkDriver.RevokeExternalConnectivity', methods=['POST'])
-def stop_container_dhcp():
-    req = request.get_json(force=True)
-    endpoint = req['EndpointID']
-
-    if endpoint in container_dhcp_clients:
-        container_dhcp_clients[endpoint].stop()
-        del container_dhcp_clients[endpoint]
-
-    return jsonify({})
