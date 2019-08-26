@@ -101,6 +101,10 @@ def net_get_capabilities():
 @app.route('/NetworkDriver.CreateNetwork', methods=['POST'])
 def create_net():
     req = request.get_json(force=True)
+    for data in req['IPv4Data']:
+        if data['AddressSpace'] != 'null' or data['Pool'] != '0.0.0.0/0':
+            return jsonify({'Err': 'Only the null IPAM driver is supported'}), 400
+
     options = req['Options'][OPTS_KEY]
     if OPT_BRIDGE not in options:
         return jsonify({'Err': 'No bridge provided'}), 400
@@ -158,11 +162,13 @@ def create_endpoint():
             addr = None
             k = 'AddressIPv6' if type_ == 'v6' else 'Address'
             if k in req_iface and req_iface[k]:
+                # TODO: Should we allow static IP's somehow?
                 # Just validate the address, Docker will add it to the interface for us
-                addr = ipaddress.ip_interface(req_iface[k])
-                for bridge_addr in bridge_addrs:
-                    if addr.ip == bridge_addr.ip:
-                        raise NetDhcpError(400, f'Address {addr} is already in use on bridge {bridge["ifname"]}')
+                #addr = ipaddress.ip_interface(req_iface[k])
+                #for bridge_addr in bridge_addrs:
+                #    if addr.ip == bridge_addr.ip:
+                #        raise NetDhcpError(400, f'Address {addr} is already in use on bridge {bridge["ifname"]}')
+                raise NetDhcpError('Only the null IPAM driver is supported')
             else:
                 dhcp = udhcpc.DHCPClient(if_container, v6=type_ == 'v6', once=True)
                 addr = dhcp.finish()
