@@ -14,6 +14,7 @@ from pyroute2.netns.process.proxy import NSPopen
 
 HANDLER_SCRIPT = path.join(path.dirname(__file__), 'udhcpc_handler.py')
 AWAIT_INTERVAL = 0.1
+VENDOR_ID = 'docker'
 
 class EventType(Enum):
     BOUND = 'bound'
@@ -46,6 +47,8 @@ class DHCPClient:
         bin_path = '/usr/bin/udhcpc6' if v6 else '/sbin/udhcpc'
         cmdline = [bin_path, '-s', HANDLER_SCRIPT, '-i', iface['ifname'], '-f']
         cmdline.append('-q' if once else '-R')
+        if not v6:
+            cmdline += ['-V', VENDOR_ID]
 
         self._suffix = '6' if v6 else ''
         self._event_queue = posix_ipc.MessageQueue(f'/udhcpc{self._suffix}_{iface["address"].replace(":", "_")}', \
