@@ -8,6 +8,7 @@ import threading
 
 import pyroute2
 from pyroute2.netlink.rtnl import rtypes
+from pyroute2.netns.process.proxy import NSPopen
 import docker
 from flask import request, jsonify
 
@@ -291,25 +292,33 @@ class ContainerDHCPManager:
         self._thread.start()
 
     def _on_event(self, dhcp, event_type, _event):
-        if event_type != udhcpc.EventType.RENEW:
+        if event_type != udhcpc.EventType.RENEW or not dhcp.gateway:
             return
 
-        for route in dhcp.iface.routes:
-            if route['type'] != rtypes['RTN_UNICAST'] or \
-                (route['family'] == socket.AF_INET6 and not self.ipv6) or \
-                route['dst'] not in ('', '/0'):
-                continue
+        logger.info('[dhcp container] Replacing gateway with %s', dhcp.gateway)
+        proc = NSPopen(dhcp.netns, ['/sbin/ip', 'route', 'replace', 'default', 'via', str(dhcp.gateway)])
+        if proc.wait(timeout=1) != 0:
+            raise NetDhcpError(f'Failed to replace default route; "ip route" command exited with non-zero code %d', \
+                proc.returncode)
 
-            # Needed because Route.remove() doesn't like a blank destination
-            logger.info('Removing default route via %s', route['gateway'])
-            route['dst'] = '::' if route['family'] == socket.AF_INET6 else '0.0.0.0'
-            (route
-                .remove()
-                .commit())
+        # TODO: Adding default route with NDB seems to be broken (because of the dst syntax?)
+        #for route in ndb.routes:
+        #    if route['type'] != rtypes['RTN_UNICAST'] or \
+        #        route['oif'] != dhcp.iface['index'] or \
+        #        (route['family'] == socket.AF_INET6 and not self.ipv6) or \
+        #        route['dst'] not in ('', '/0'):
+        #        continue
 
-        logger.info('Adding default route via %s', dhcp.gateway)
-        (dhcp.iface.routes.add({'gateway': dhcp.gateway})
-            .commit())
+        #    # Needed because Route.remove() doesn't like a blank destination
+        #    logger.info('Removing default route via %s', route['gateway'])
+        #    route['dst'] = '::' if route['family'] == socket.AF_INET6 else '0.0.0.0'
+        #    (route
+        #        .remove()
+        #        .commit())
+
+        #logger.info('Adding default route via %s', dhcp.gateway)
+        #(ndb.routes.add({'oif': dhcp.iface['index'], 'gateway': dhcp.gateway})
+        #    .commit())
 
     def run(self):
         try:

@@ -13,7 +13,7 @@ event = {'type': sys.argv[1]}
 if event['type'] in ('bound', 'renew'):
     event['ip'] = f'{env["ip"]}/{env["mask"]}'
     if 'router' in env:
-        event['router'] = env['router']
+        event['gateway'] = env['router']
     if 'domain' in env:
         event['domain'] = env['domain']
 elif event['type'] in ('deconfig', 'leasefail', 'nak'):
