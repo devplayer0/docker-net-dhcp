@@ -161,7 +161,11 @@ def create_endpoint():
     }
 
     try:
-        if 'MacAddress' not in req_iface or not req_iface['MacAddress']:
+        if 'MacAddress' in req_iface and req_iface['MacAddress']:
+            (if_container
+            .set('address', req_iface['MacAddress'])
+            .commit())
+        else:
             res_iface['MacAddress'] = if_container['address']
 
         def try_addr(type_):
