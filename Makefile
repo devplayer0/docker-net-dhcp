@@ -1,7 +1,7 @@
 PLUGIN_NAME = devplayer0/net-dhcp
 PLUGIN_TAG ?= latest
 
-all: clean rootfs build create
+all: clean build rootfs create enable
 
 clean:
 	@echo "### rm ./plugin"
