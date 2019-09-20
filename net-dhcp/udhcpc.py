@@ -126,21 +126,23 @@ class DHCPClient:
         if self._shutdown_event.is_set():
             return
 
-        if self.proc.returncode is not None and (not self.once or self.proc.returncode != 0):
-            raise DHCPClientError(f'udhcpc{self._suffix} exited early with code {self.proc.returncode}')
-        if self.once:
-            self.await_ip()
-        else:
-            self.proc.terminate()
+        try:
+            if self.proc.returncode is not None and (not self.once or self.proc.returncode != 0):
+                raise DHCPClientError(f'udhcpc{self._suffix} exited early with code {self.proc.returncode}')
+            if self.once:
+                self.await_ip()
+            else:
+                self.proc.terminate()
 
-        if self.proc.wait(timeout=timeout) != 0:
-            raise DHCPClientError(f'udhcpc{self._suffix} exited with non-zero exit code {self.proc.returncode}')
-        if self.netns:
-            self.proc.release()
+            if self.proc.wait(timeout=timeout) != 0:
+                raise DHCPClientError(f'udhcpc{self._suffix} exited with non-zero exit code {self.proc.returncode}')
 
-        self._shutdown_event.set()
-        self._event_thread.join()
-        self._event_queue.close()
-        self._event_queue.unlink()
+            return self.ip
+        finally:
+            if self.netns:
+                self.proc.release()
 
-        return self.ip
+            self._shutdown_event.set()
+            self._event_thread.join()
+            self._event_queue.close()
+            self._event_queue.unlink()

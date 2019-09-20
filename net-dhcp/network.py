@@ -324,9 +324,12 @@ class ContainerDHCPManager:
 
         logger.info('[dhcp container] Replacing gateway with %s', dhcp.gateway)
         proc = NSPopen(dhcp.netns, ['/sbin/ip', 'route', 'replace', 'default', 'via', str(dhcp.gateway)])
-        if proc.wait(timeout=1) != 0:
-            raise NetDhcpError(f'Failed to replace default route; "ip route" command exited with non-zero code %d', \
-                proc.returncode)
+        try:
+            if proc.wait(timeout=1) != 0:
+                raise NetDhcpError(f'Failed to replace default route; "ip route" command exited with non-zero code %d', \
+                    proc.returncode)
+        finally:
+            proc.release()
 
         # TODO: Adding default route with NDB seems to be broken (because of the dst syntax?)
         #for route in ndb.routes:
@@ -362,6 +365,8 @@ class ContainerDHCPManager:
                     self.dhcp6.netns)
         except Exception as e:
             logger.exception(e)
+            if self.dhcp:
+                self.dhcp.finish(timeout=1)
 
     def stop(self):
         if not self.dhcp:
