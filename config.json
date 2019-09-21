@@ -6,7 +6,7 @@
             "docker.networkdriver/1.0"
         ]
     },
-    "entrypoint": [ "/opt/plugin/launch.sh" ],
+    "entrypoint": [ "python", "-m", "net_dhcp" ],
     "workdir": "/opt/plugin",
     "network": {
         "type": "host"
@@ -25,16 +25,8 @@
     "linux": {
         "capabilities": [
             "CAP_NET_ADMIN",
-            "CAP_SYS_ADMIN"
+            "CAP_SYS_ADMIN",
+            "CAP_SYS_PTRACE"
         ]
-    },
-    "env": [
-        {
-            "name": "GUNICORN_OPTS",
-            "settable": [
-                "value"
-            ],
-            "value": "--log-level DEBUG --log-file /var/log/net-dhcp.log"
-        }
-    ]
+    }
 }

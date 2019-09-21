@@ -18,7 +18,7 @@ OPTS_KEY = 'com.docker.network.generic'
 OPT_BRIDGE = 'bridge'
 OPT_IPV6 = 'ipv6'
 
-logger = logging.getLogger('gunicorn.error')
+logger = logging.getLogger('net-dhcp')
 
 ndb = pyroute2.NDB()
 @atexit.register
@@ -147,6 +147,7 @@ def create_endpoint():
                 .set('state', 'up')
                 .commit())
 
+    time.sleep(0.5)
     if_container = (ndb.interfaces[if_container]
                     .set('state', 'up')
                     .commit())
@@ -372,14 +373,16 @@ class ContainerDHCPManager:
         if not self.dhcp:
             return
 
-        logger.info('Shutting down DHCPv4 client on %s in container namespace %s', \
-            self.dhcp.iface['ifname'], self.dhcp.netns)
-        self.dhcp.finish(timeout=1)
-
-        if self.ipv6:
-            logger.info('Shutting down DHCPv6 client on %s in container namespace %s', \
-                self.dhcp6.iface['ifname'], self.dhcp.netns)
-            self.dhcp6.finish(timeout=1)
-
-        ndb.sources.remove(self.dhcp.netns)
-        self._thread.join()
+        try:
+            logger.info('Shutting down DHCPv4 client on %s in container namespace %s', \
+                self.dhcp.iface['ifname'], self.dhcp.netns)
+            self.dhcp.finish(timeout=1)
+        finally:
+            try:
+                if self.ipv6:
+                    logger.info('Shutting down DHCPv6 client on %s in container namespace %s', \
+                        self.dhcp6.iface['ifname'], self.dhcp.netns)
+                    self.dhcp6.finish(timeout=1)
+            finally:
+                ndb.sources.remove(self.dhcp.netns)
+                self._thread.join()

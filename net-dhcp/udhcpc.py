@@ -24,7 +24,7 @@ class EventType(Enum):
     DECONFIG = 'deconfig'
     LEASEFAIL = 'leasefail'
 
-logger = logging.getLogger('gunicorn.error')
+logger = logging.getLogger('net-dhcp')
 
 class DHCPClientError(Exception):
     pass
@@ -66,7 +66,7 @@ class DHCPClient:
 
         self._suffix = '6' if v6 else ''
         self._event_queue = posix_ipc.MessageQueue(f'/udhcpc{self._suffix}_{iface["address"].replace(":", "_")}', \
-            flags=os.O_CREAT | os.O_EXCL)
+            flags=os.O_CREAT | os.O_EXCL, max_messages=2, max_message_size=1024)
         self.proc = Popen(cmdline, env={'EVENT_QUEUE': self._event_queue.name})
         if hostname:
             logger.debug('[udhcpc%s#%d] using hostname "%s"', self._suffix, self.proc.pid, hostname)
@@ -77,6 +77,7 @@ class DHCPClient:
         self.domain = None
 
         self._shutdown_event = EventFD()
+        self.shutdown = False
         self._event_thread = threading.Thread(target=self._read_events)
         self._event_thread.start()
 
@@ -115,6 +116,8 @@ class DHCPClient:
                     listener(self, event['type'], event)
                 except Exception as ex:
                     logger.exception(ex)
+        self.shutdown = True
+        del self._shutdown_event
 
     def await_ip(self, timeout=10):
         if not self._has_lease.wait(timeout=timeout):
@@ -123,7 +126,7 @@ class DHCPClient:
         return self.ip
 
     def finish(self, timeout=5):
-        if self._shutdown_event.is_set():
+        if self.shutdown or self._shutdown_event.is_set():
             return
 
         try:
