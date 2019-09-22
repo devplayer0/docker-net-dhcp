@@ -67,7 +67,7 @@ class DHCPClient:
         self._event_queue = posix_ipc.MessageQueue(f'/udhcpc{self._suffix}_{iface["address"].replace(":", "_")}', \
             flags=os.O_CREAT | os.O_EXCL, max_messages=2, max_message_size=1024)
         self.proc = Popen(cmdline, env={'EVENT_QUEUE': self._event_queue.name}, stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, preexec_fn=close_fds)
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         if hostname:
             logger.debug('[udhcpc%s#%d] using hostname "%s"', self._suffix, self.proc.pid, hostname)
 

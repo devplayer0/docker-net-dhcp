@@ -145,21 +145,28 @@ def create_endpoint():
                 .set('state', 'up')
                 .commit())
 
-    time.sleep(0.5)
-    if_container = (ndb.interfaces[if_container]
-                    .set('state', 'up')
-                    .commit())
-    (bridge
-        .add_port(if_host)
-        .commit())
-
-    res_iface = {
-        'MacAddress': '',
-        'Address': '',
-        'AddressIPv6': ''
-    }
-
     try:
+        start = time.time()
+        while isinstance(if_container, str) and time.time() - start < 10:
+            try:
+                if_container = (ndb.interfaces[if_container]
+                                .set('state', 'up')
+                                .commit())
+            except KeyError:
+                time.sleep(0.5)
+        if isinstance(if_container, str):
+            raise NetDhcpError(f'timed out waiting for {if_container} to appear in host')
+
+        (bridge
+            .add_port(if_host)
+            .commit())
+
+        res_iface = {
+            'MacAddress': '',
+            'Address': '',
+            'AddressIPv6': ''
+        }
+
         if 'MacAddress' in req_iface and req_iface['MacAddress']:
             (if_container
             .set('address', req_iface['MacAddress'])
@@ -199,9 +206,10 @@ def create_endpoint():
     except Exception as e:
         logger.exception(e)
 
-        (bridge
-            .del_port(if_host)
-            .commit())
+        if not isinstance(if_container, str):
+            (bridge
+                .del_port(if_host)
+                .commit())
         (if_host
             .remove()
             .commit())
