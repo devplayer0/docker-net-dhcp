@@ -5,10 +5,10 @@ import atexit
 import socket
 import time
 import threading
+import subprocess
 
 import pyroute2
 from pyroute2.netlink.rtnl import rtypes
-from pyroute2.netns.process.proxy import NSPopen
 import docker
 from flask import request, jsonify
 
@@ -66,17 +66,15 @@ def endpoint_container_iface(n, e):
             container = client.containers.get(cid)
             netns = f'/proc/{container.attrs["State"]["Pid"]}/ns/net'
 
-            already = False
-            for source in ndb.sources:
-                if source == netns:
-                    already = True
-                    break
-            if not already:
-                ndb.sources.add(netns=netns)
-
-            for i in ndb.interfaces:
-                if i['address'] == info['MacAddress']:
-                    return i
+            with pyroute2.NetNS(netns) as rtnl:
+                for link in rtnl.get_links():
+                    attrs = dict(link['attrs'])
+                    if attrs['IFLA_ADDRESS'] == info['MacAddress']:
+                        return {
+                            'netns': netns,
+                            'ifname': attrs['IFLA_IFNAME'],
+                            'address': attrs['IFLA_ADDRESS']
+                        }
             break
     return None
 def await_endpoint_container_iface(n, e, timeout=5):
@@ -324,13 +322,9 @@ class ContainerDHCPManager:
             return
 
         logger.info('[dhcp container] Replacing gateway with %s', dhcp.gateway)
-        proc = NSPopen(dhcp.netns, ['/sbin/ip', 'route', 'replace', 'default', 'via', str(dhcp.gateway)])
-        try:
-            if proc.wait(timeout=1) != 0:
-                raise NetDhcpError(f'Failed to replace default route; "ip route" command exited with non-zero code %d', \
-                    proc.returncode)
-        finally:
-            proc.release()
+        subprocess.check_call(['nsenter', f'-n{dhcp.netns}', '--', '/sbin/ip', 'route', 'replace', 'default', 'via',
+            str(dhcp.gateway)], timeout=1, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL)
 
         # TODO: Adding default route with NDB seems to be broken (because of the dst syntax?)
         #for route in ndb.routes:
@@ -384,5 +378,9 @@ class ContainerDHCPManager:
                         self.dhcp6.iface['ifname'], self.dhcp.netns)
                     self.dhcp6.finish(timeout=1)
             finally:
-                ndb.sources.remove(self.dhcp.netns)
                 self._thread.join()
+
+                # we have to do this since the docker client leaks sockets...
+                global client
+                client.close()
+                client = docker.from_env()

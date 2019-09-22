@@ -12,7 +12,6 @@ import logging
 
 from eventfd import EventFD
 import posix_ipc
-from pyroute2.netns.process.proxy import NSPopen
 
 HANDLER_SCRIPT = path.join(path.dirname(__file__), 'udhcpc_handler.py')
 AWAIT_INTERVAL = 0.1
@@ -30,7 +29,7 @@ class DHCPClientError(Exception):
     pass
 
 def _nspopen_wrapper(netns):
-    return lambda *args, **kwargs: NSPopen(netns, *args, **kwargs)
+    return lambda cmd, *args, **kwargs: subprocess.Popen(['nsenter', f'-n{netns}', '--'] + cmd, *args, **kwargs)
 class DHCPClient:
     def __init__(self, iface, v6=False, once=False, hostname=None, event_listener=None):
         self.iface = iface
@@ -41,8 +40,8 @@ class DHCPClient:
             self.event_listeners.append(event_listener)
 
         self.netns = None
-        if iface['target'] and iface['target'] != 'localhost':
-            self.netns = iface['target']
+        if 'netns' in iface:
+            self.netns = iface['netns']
             logger.debug('udhcpc using netns %s', self.netns)
 
         Popen = _nspopen_wrapper(self.netns) if self.netns else subprocess.Popen
@@ -67,7 +66,8 @@ class DHCPClient:
         self._suffix = '6' if v6 else ''
         self._event_queue = posix_ipc.MessageQueue(f'/udhcpc{self._suffix}_{iface["address"].replace(":", "_")}', \
             flags=os.O_CREAT | os.O_EXCL, max_messages=2, max_message_size=1024)
-        self.proc = Popen(cmdline, env={'EVENT_QUEUE': self._event_queue.name})
+        self.proc = Popen(cmdline, env={'EVENT_QUEUE': self._event_queue.name}, stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, preexec_fn=close_fds)
         if hostname:
             logger.debug('[udhcpc%s#%d] using hostname "%s"', self._suffix, self.proc.pid, hostname)
 
@@ -142,9 +142,6 @@ class DHCPClient:
 
             return self.ip
         finally:
-            if self.netns:
-                self.proc.release()
-
             self._shutdown_event.set()
             self._event_thread.join()
             self._event_queue.close()
