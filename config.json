@@ -6,8 +6,8 @@
             "docker.networkdriver/1.0"
         ]
     },
-    "entrypoint": [ "python", "-m", "net_dhcp" ],
-    "workdir": "/opt/plugin",
+    "entrypoint": ["/net-dhcp", "-logfile", "/net-dhcp.log"],
+    "workdir": "/",
     "network": {
         "type": "host"
     },

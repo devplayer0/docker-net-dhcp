@@ -1,4 +1,5 @@
+/bin/*
+!/bin/.gitkeep
 /plugin/
-__pycache__/
 
 .vscode/

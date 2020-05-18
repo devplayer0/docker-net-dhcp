@@ -1,40 +1,39 @@
 PLUGIN_NAME = devplayer0/net-dhcp
-PLUGIN_TAG ?= latest
+PLUGIN_TAG ?= golang
 
-all: clean build rootfs create enable
+BINARY = bin/net-dhcp
+PLUGIN_DIR = plugin
+
+.PHONY: all clean disable
+
+all: create enable
+
+$(BINARY): cmd/net-dhcp/main.go
+	CGO_ENABLED=0 go build -o $@ ./cmd/net-dhcp
+
+debug: $(BINARY)
+	sudo $< -log debug
+
+plugin: $(BINARY) config.json
+	mkdir -p $@/rootfs/run/docker/plugins
+	cp $(BINARY) $@/rootfs/
+	cp config.json $@/
+
+create: plugin
+	docker plugin rm -f ${PLUGIN_NAME}:${PLUGIN_TAG} || true
+	docker plugin create ${PLUGIN_NAME}:${PLUGIN_TAG} $<
+
+enable: plugin
+	docker plugin enable ${PLUGIN_NAME}:${PLUGIN_TAG}
+disable:
+	docker plugin disable ${PLUGIN_NAME}:${PLUGIN_TAG}
+
+pdebug: create enable
+	sudo sh -c 'tail -f /var/lib/docker/plugins/*/rootfs/net-dhcp.log'
+
+push: plugin
+	docker plugin push ${PLUGIN_NAME}:${PLUGIN_TAG}
 
 clean:
-	@echo "### rm ./plugin"
-	@rm -rf ./plugin
-
-build:
-	@echo "### docker build: rootfs image with net-dhcp"
-	@docker build -t ${PLUGIN_NAME}:rootfs .
-
-rootfs:
-	@echo "### create rootfs directory in ./plugin/rootfs"
-	@mkdir -p ./plugin/rootfs
-	@docker create --name tmp ${PLUGIN_NAME}:rootfs
-	@docker export tmp | tar -x -C ./plugin/rootfs
-	@echo "### copy config.json to ./plugin/"
-	@cp config.json ./plugin/
-	@docker rm -vf tmp
-
-create:
-	@echo "### remove existing plugin ${PLUGIN_NAME}:${PLUGIN_TAG} if exists"
-	@docker plugin rm -f ${PLUGIN_NAME}:${PLUGIN_TAG} || true
-	@echo "### create new plugin ${PLUGIN_NAME}:${PLUGIN_TAG} from ./plugin"
-	@docker plugin create ${PLUGIN_NAME}:${PLUGIN_TAG} ./plugin
-
-debug:
-	@docker run --rm -ti --cap-add CAP_SYS_ADMIN --network host --volume /run/docker/plugins:/run/docker/plugins \
-		--volume /run/docker.sock:/run/docker.sock --volume /var/run/docker/netns:/var/run/docker/netns \
-		${PLUGIN_NAME}:rootfs
-
-enable:
-	@echo "### enable plugin ${PLUGIN_NAME}:${PLUGIN_TAG}"		
-	@docker plugin enable ${PLUGIN_NAME}:${PLUGIN_TAG}
-
-push:
-	@echo "### push plugin ${PLUGIN_NAME}:${PLUGIN_TAG}"
-	@docker plugin push ${PLUGIN_NAME}:${PLUGIN_TAG}
+	-rm -rf ./plugin
+	-rm - bin/*
