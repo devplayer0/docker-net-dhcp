@@ -1,6 +1,7 @@
 PLUGIN_NAME = devplayer0/net-dhcp
 PLUGIN_TAG ?= golang
 
+SOURCES = $(shell find pkg/ pkg/ -name '*.go')
 BINARY = bin/net-dhcp
 PLUGIN_DIR = plugin
 
@@ -8,7 +9,7 @@ PLUGIN_DIR = plugin
 
 all: create enable
 
-$(BINARY): cmd/net-dhcp/main.go
+$(BINARY): $(SOURCES)
 	CGO_ENABLED=0 go build -o $@ ./cmd/net-dhcp
 
 debug: $(BINARY)

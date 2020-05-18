@@ -29,26 +29,30 @@ func main() {
 		f, err := os.OpenFile(*logFile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
 		if err != nil {
 			log.WithError(err).Fatal("Failed to open log file for writing")
-			return
 		}
 		defer f.Close()
 
 		log.StandardLogger().Out = f
 	}
 
-	p := plugin.NewPlugin()
+	p, err := plugin.NewPlugin()
+	if err != nil {
+		log.WithError(err).Fatal("Failed to create plugin")
+	}
 
 	sigs := make(chan os.Signal, 1)
 	signal.Notify(sigs, unix.SIGINT, unix.SIGTERM)
 
 	go func() {
 		log.Info("Starting server...")
-		if err := p.Start(*bindSock); err != nil {
-			log.WithError(err).Fatal("Failed to start server")
+		if err := p.Listen(*bindSock); err != nil {
+			log.WithError(err).Fatal("Failed to start plugin")
 		}
 	}()
 
 	<-sigs
 	log.Info("Shutting down...")
-	p.Stop()
+	if err := p.Close(); err != nil {
+		log.WithError(err).Fatal("Failed to stop plugin")
+	}
 }
