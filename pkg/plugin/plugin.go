@@ -2,14 +2,24 @@ package plugin
 
 import (
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 
 	docker "github.com/docker/docker/client"
+	"github.com/gorilla/handlers"
+	log "github.com/sirupsen/logrus"
 )
 
 // DriverName is the name of the Docker Network Driver
 const DriverName string = "net-dhcp"
+
+func writeAccessLog(w io.Writer, params handlers.LogFormatterParams) {
+	log.WithFields(log.Fields{
+		"status":  params.StatusCode,
+		"resSize": params.Size,
+	}).Debugf("%v %v", params.Request.Method, params.URL.RequestURI())
+}
 
 // Plugin is the DHCP network plugin
 type Plugin struct {
@@ -30,11 +40,12 @@ func NewPlugin() (*Plugin, error) {
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/NetworkDriver.GetCapabilities", p.apiGetCapabilities)
+
 	mux.HandleFunc("/NetworkDriver.CreateNetwork", p.apiCreateNetwork)
 	mux.HandleFunc("/NetworkDriver.DeleteNetwork", p.apiDeleteNetwork)
 
 	p.server = http.Server{
-		Handler: mux,
+		Handler: handlers.CustomLoggingHandler(nil, mux, writeAccessLog),
 	}
 
 	return &p, nil
