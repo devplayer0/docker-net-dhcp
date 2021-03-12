@@ -6,7 +6,8 @@ import socket
 import time
 import threading
 import subprocess
-
+import shelve
+import os
 import pyroute2
 from pyroute2.netlink.rtnl import rtypes
 import docker
@@ -18,9 +19,15 @@ OPTS_KEY = 'com.docker.network.generic'
 OPT_BRIDGE = 'bridge'
 OPT_IPV6 = 'ipv6'
 
-logger = logging.getLogger('net-dhcp')
+config_file='/etc/net-dhcp/iface.conf'
+config_path = os.path.dirname(config_file)
+if not os.path.exists(config_path):
+    os.makedirs(config_path)
+config = shelve.open(config_file, 'c', writeback = True)
 
+logger = logging.getLogger('net-dhcp')
 ndb = pyroute2.NDB()
+
 @atexit.register
 def close_ndb():
     ndb.close()
@@ -55,10 +62,24 @@ def get_bridges():
         set(iface_nets(i)).intersection(reserved_nets), map(lambda i: ndb.interfaces[i.ifname], ndb.interfaces))))
 
 def net_bridge(n):
-    return ndb.interfaces[client.networks.get(n).attrs['Options'][OPT_BRIDGE]]
+    if n in config:
+        return ndb.interfaces[config[n][OPT_BRIDGE]]
+    else:
+        options = client.networks.get(n).attrs['Options']
+        ipv6 = OPT_IPV6 in options and options[OPT_IPV6] == 'true';
+        config[n] = { OPT_BRIDGE: options[OPT_BRIDGE], OPT_IPV6: ipv6 }
+        config.sync()
+        return ndb.interfaces[options[OPT_BRIDGE]]
+
 def ipv6_enabled(n):
-    options = client.networks.get(n).attrs['Options']
-    return OPT_IPV6 in options and options[OPT_IPV6] == 'true'
+    if n in config:
+        return config[n][OPT_IPV6]
+    else:
+        options = client.networks.get(n).attrs['Options']
+        ipv6 = OPT_IPV6 in options and options[OPT_IPV6] == 'true';
+        config[n] = { OPT_BRIDGE: options[OPT_BRIDGE], OPT_IPV6: ipv6 }
+        config.sync()
+        return ipv6
 
 def endpoint_container_iface(n, e):
     for cid, info in client.networks.get(n).attrs['Containers'].items():
@@ -114,19 +135,29 @@ def create_net():
         return jsonify({'Err': 'No bridge provided'}), 400
     # We have to use a custom "enable IPv6" option because Docker's null IPAM driver doesn't support IPv6 and a plugin
     # IPAM driver isn't allowed to return an empty address
-    if OPT_IPV6 in options and options[OPT_IPV6] not in ('', 'true', 'false'):
-        return jsonify({'Err': 'Invalid boolean value for ipv6'}), 400
+    ipv6 = False
+    if OPT_IPV6 in options:
+        if options[OPT_IPV6] not in ('', 'true', 'false'):
+            return jsonify({'Err': 'Invalid boolean value for ipv6'}), 400
+        else:
+            ipv6 = True if options[OPT_IPV6] == 'true' else False
 
     desired = options[OPT_BRIDGE]
     bridges = get_bridges()
     if desired not in bridges:
         return jsonify({'Err': f'Bridge "{desired}" not found (or the specified bridge is already used by Docker)'}), 400
-
+    config[req['NetworkID']] = { OPT_BRIDGE: desired, OPT_IPV6: ipv6 }
+    config.sync()
     logger.info('Creating network "%s" (using bridge "%s")', req['NetworkID'], desired)
     return jsonify({})
 
 @app.route('/NetworkDriver.DeleteNetwork', methods=['POST'])
 def delete_net():
+    req = request.get_json(force=True)
+    network_id = req['NetworkID']
+    if network_id in config:
+        del config[network_id]
+        config.sync()
     return jsonify({})
 
 @app.route('/NetworkDriver.CreateEndpoint', methods=['POST'])
