@@ -36,8 +36,6 @@ func main() {
 			event.Data.Domain = os.Getenv("domain")
 		}
 	case "deconfig", "leasefail", "nak":
-		log.Debugf("Ignoring `%v` event", event.Type)
-		return
 	default:
 		log.Warnf("Ignoring unknown event type `%v`", event.Type)
 		return
