@@ -4,10 +4,8 @@ import (
 	"context"
 	"fmt"
 	"net"
-	"time"
 
 	dTypes "github.com/docker/docker/api/types"
-	"github.com/mitchellh/mapstructure"
 	log "github.com/sirupsen/logrus"
 	"github.com/vishvananda/netlink"
 	"golang.org/x/sys/unix"
@@ -27,8 +25,8 @@ const CLIOptionsKey string = "com.docker.network.generic"
 func (p *Plugin) CreateNetwork(r CreateNetworkRequest) error {
 	log.WithField("options", r.Options).Debug("CreateNetwork options")
 
-	opts := DHCPNetworkOptions{}
-	if err := mapstructure.Decode(r.Options[util.OptionsKeyGeneric], &opts); err != nil {
+	opts, err := decodeOpts(r.Options[util.OptionsKeyGeneric])
+	if err != nil {
 		return fmt.Errorf("failed to decode network options: %w", err)
 	}
 
@@ -111,15 +109,16 @@ func vethPairNames(id string) (string, string) {
 }
 
 func (p *Plugin) netOptions(ctx context.Context, id string) (DHCPNetworkOptions, error) {
-	opts := DHCPNetworkOptions{}
+	dummy := DHCPNetworkOptions{}
 
 	n, err := p.docker.NetworkInspect(ctx, id, dTypes.NetworkInspectOptions{})
 	if err != nil {
-		return opts, fmt.Errorf("failed to get info from Docker: %w", err)
+		return dummy, fmt.Errorf("failed to get info from Docker: %w", err)
 	}
 
-	if err := mapstructure.Decode(n.Options, &opts); err != nil {
-		return opts, fmt.Errorf("failed to parse options: %w", err)
+	opts, err := decodeOpts(n.Options)
+	if err != nil {
+		return dummy, fmt.Errorf("failed to parse options: %w", err)
 	}
 
 	return opts, nil
@@ -188,9 +187,12 @@ func (p *Plugin) CreateEndpoint(ctx context.Context, r CreateEndpointRequest) (C
 			return fmt.Errorf("failed to attach host side link of veth peer to bridge: %w", err)
 		}
 
+		timeout := defaultLeaseTimeout
+		if opts.LeaseTimeout != 0 {
+			timeout = opts.LeaseTimeout
+		}
 		initialIP := func(v6 bool) error {
-			// TODO: Make this a config option
-			timeoutCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+			timeoutCtx, cancel := context.WithTimeout(ctx, timeout)
 			defer cancel()
 
 			info, err := udhcpc.GetIP(timeoutCtx, ctrName, &udhcpc.DHCPClientOptions{V6: v6})

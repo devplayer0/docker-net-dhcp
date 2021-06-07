@@ -4,9 +4,11 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"time"
 
 	docker "github.com/docker/docker/client"
 	"github.com/gorilla/handlers"
+	"github.com/mitchellh/mapstructure"
 
 	"github.com/devplayer0/docker-net-dhcp/pkg/util"
 )
@@ -14,10 +16,33 @@ import (
 // DriverName is the name of the Docker Network Driver
 const DriverName string = "net-dhcp"
 
+const defaultLeaseTimeout = 10 * time.Second
+
 // DHCPNetworkOptions contains options for the DHCP network driver
 type DHCPNetworkOptions struct {
-	Bridge string
-	IPv6   bool
+	Bridge       string
+	IPv6         bool
+	LeaseTimeout time.Duration `mapstructure:"lease_timeout"`
+}
+
+func decodeOpts(input interface{}) (DHCPNetworkOptions, error) {
+	var opts DHCPNetworkOptions
+	optsDecoder, err := mapstructure.NewDecoder(&mapstructure.DecoderConfig{
+		Result:      &opts,
+		ErrorUnused: true,
+		DecodeHook: mapstructure.ComposeDecodeHookFunc(
+			mapstructure.StringToTimeDurationHookFunc(),
+		),
+	})
+	if err != nil {
+		return opts, fmt.Errorf("failed to create options decoder: %w", err)
+	}
+
+	if err := optsDecoder.Decode(input); err != nil {
+		return opts, err
+	}
+
+	return opts, nil
 }
 
 type gatewayHint struct {
