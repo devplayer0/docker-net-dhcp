@@ -9,9 +9,6 @@ jobs:
   docker:
     runs-on: ubuntu-20.04
 
-    env:
-      CR_PAT_USER: devplayer0
-
     steps:
       - uses: actions/checkout@v2
 
