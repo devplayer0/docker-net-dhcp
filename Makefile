@@ -1,4 +1,4 @@
-PLUGIN_NAME = devplayer0/net-dhcp
+PLUGIN_NAME = ghcr.io/devplayer0/docker-net-dhcp
 PLUGIN_TAG ?= golang
 
 SOURCES = $(shell find pkg/ cmd/ -name '*.go')
@@ -39,7 +39,7 @@ disable:
 pdebug: create enable
 	sudo sh -c 'tail -f /var/lib/docker/plugins/*/rootfs/var/log/net-dhcp.log'
 
-push: plugin
+push: create
 	docker plugin push $(PLUGIN_NAME):$(PLUGIN_TAG)
 
 clean:
