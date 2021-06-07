@@ -12,13 +12,19 @@ import (
 )
 
 var (
-	logLevel = flag.String("log", "info", "log level")
+	logLevel = flag.String("log", "", "log level")
 	logFile  = flag.String("logfile", "", "log file")
 	bindSock = flag.String("sock", "/run/docker/plugins/net-dhcp.sock", "bind unix socket")
 )
 
 func main() {
 	flag.Parse()
+
+	if *logLevel == "" {
+		if *logLevel = os.Getenv("LOG_LEVEL"); *logLevel == "" {
+			*logLevel = "info"
+		}
+	}
 
 	level, err := log.ParseLevel(*logLevel)
 	if err != nil {

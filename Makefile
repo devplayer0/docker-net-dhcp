@@ -29,6 +29,7 @@ plugin: plugin/rootfs config.json
 create: plugin
 	docker plugin rm -f $(PLUGIN_NAME):$(PLUGIN_TAG) || true
 	docker plugin create $(PLUGIN_NAME):$(PLUGIN_TAG) $<
+	docker plugin set $(PLUGIN_NAME):$(PLUGIN_TAG) LOG_LEVEL=trace
 
 enable: plugin
 	docker plugin enable $(PLUGIN_NAME):$(PLUGIN_TAG)
