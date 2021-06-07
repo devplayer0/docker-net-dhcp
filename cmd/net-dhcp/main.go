@@ -5,9 +5,10 @@ import (
 	"os"
 	"os/signal"
 
-	"github.com/devplayer0/docker-net-dhcp/pkg/plugin"
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/sys/unix"
+
+	"github.com/devplayer0/docker-net-dhcp/pkg/plugin"
 )
 
 var (

@@ -6,7 +6,7 @@
             "docker.networkdriver/1.0"
         ]
     },
-    "entrypoint": ["/net-dhcp", "-logfile", "/net-dhcp.log"],
+    "entrypoint": ["/usr/sbin/net-dhcp", "-log", "trace", "-logfile", "/var/log/net-dhcp.log"],
     "workdir": "/",
     "network": {
         "type": "host"
@@ -21,7 +21,7 @@
             ]
         }
     ],
-    "pidhost": true,
+    "pidhost": false,
     "linux": {
         "capabilities": [
             "CAP_NET_ADMIN",

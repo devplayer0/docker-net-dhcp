@@ -2,33 +2,43 @@ package plugin
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"net"
+	"time"
 
+	dTypes "github.com/docker/docker/api/types"
+	"github.com/mitchellh/mapstructure"
 	log "github.com/sirupsen/logrus"
 	"github.com/vishvananda/netlink"
 	"golang.org/x/sys/unix"
 
-	dTypes "github.com/docker/docker/api/types"
+	"github.com/devplayer0/docker-net-dhcp/pkg/udhcpc"
+	"github.com/devplayer0/docker-net-dhcp/pkg/util"
 )
 
 // CLIOptionsKey is the key used in create network options by the CLI for custom options
 const CLIOptionsKey string = "com.docker.network.generic"
 
-var (
-	// ErrIPAM indicates an unsupported IPAM driver was used
-	ErrIPAM = errors.New("only the null IPAM driver is supported")
-	// ErrBridge indicates that a bridge is unavailable for use
-	ErrBridge = errors.New("bridge not found or already in use by Docker")
-)
+// Implementations of the endpoints described in
+// https://github.com/moby/libnetwork/blob/master/docs/remote.md
 
 // CreateNetwork "creates" a new DHCP network (just checks if the provided bridge exists and the null IPAM driver is
 // used)
 func (p *Plugin) CreateNetwork(r CreateNetworkRequest) error {
+	log.WithField("options", r.Options).Debug("CreateNetwork options")
+
+	opts := DHCPNetworkOptions{}
+	if err := mapstructure.Decode(r.Options[util.OptionsKeyGeneric], &opts); err != nil {
+		return fmt.Errorf("failed to decode network options: %w", err)
+	}
+
+	if opts.Bridge == "" {
+		return util.ErrBridgeRequired
+	}
+
 	for _, d := range r.IPv4Data {
 		if d.AddressSpace != "null" || d.Pool != "0.0.0.0/0" {
-			return ErrIPAM
+			return util.ErrIPAM
 		}
 	}
 
@@ -45,7 +55,7 @@ func (p *Plugin) CreateNetwork(r CreateNetworkRequest) error {
 	found := false
 	for _, l := range links {
 		attrs := l.Attrs()
-		if l.Type() != "bridge" || attrs.Name != r.Options.Generic.Bridge {
+		if l.Type() != "bridge" || attrs.Name != opts.Bridge {
 			continue
 		}
 
@@ -69,7 +79,7 @@ func (p *Plugin) CreateNetwork(r CreateNetworkRequest) error {
 
 				for _, linkAddr := range addrs {
 					if linkAddr.IPNet.Contains(cidr.IP) || cidr.Contains(linkAddr.IP) {
-						return ErrBridge
+						return util.ErrBridgeUsed
 					}
 				}
 			}
@@ -78,19 +88,238 @@ func (p *Plugin) CreateNetwork(r CreateNetworkRequest) error {
 		break
 	}
 	if !found {
-		return ErrBridge
+		return util.ErrBridgeNotFound
 	}
 
 	log.WithFields(log.Fields{
 		"network": r.NetworkID,
-		"bridge":  r.Options.Generic.Bridge,
-		"ipv6":    r.Options.Generic.IPv6,
-	}).Info("Creating network")
+		"bridge":  opts.Bridge,
+		"ipv6":    opts.IPv6,
+	}).Info("Network created")
 
 	return nil
 }
 
 // DeleteNetwork "deletes" a DHCP network (does nothing, the bridge is managed by the user)
-func (p *Plugin) DeleteNetwork() error {
+func (p *Plugin) DeleteNetwork(r DeleteNetworkRequest) error {
+	log.WithField("network", r.NetworkID).Info("Network deleted")
+	return nil
+}
+
+func vethPairNames(id string) (string, string) {
+	return "dh-" + id[:12], id[:12] + "-dh"
+}
+
+func (p *Plugin) netOptions(ctx context.Context, id string) (DHCPNetworkOptions, error) {
+	opts := DHCPNetworkOptions{}
+
+	n, err := p.docker.NetworkInspect(ctx, id, dTypes.NetworkInspectOptions{})
+	if err != nil {
+		return opts, fmt.Errorf("failed to get info from Docker: %w", err)
+	}
+
+	if err := mapstructure.Decode(n.Options, &opts); err != nil {
+		return opts, fmt.Errorf("failed to parse options: %w", err)
+	}
+
+	return opts, nil
+}
+
+// CreateEndpoint creates a veth pair and uses udhcpc to acquire an initial IP address on the container end. Docker will
+// move the interface into the container's namespace and apply the address.
+func (p *Plugin) CreateEndpoint(ctx context.Context, r CreateEndpointRequest) (CreateEndpointResponse, error) {
+	log.WithField("options", r.Options).Debug("CreateEndpoint options")
+	res := CreateEndpointResponse{
+		Interface: &EndpointInterface{},
+	}
+
+	if r.Interface != nil && (r.Interface.Address != "" || r.Interface.AddressIPv6 != "") {
+		// TODO: Should we allow static IP's somehow?
+		return res, util.ErrIPAM
+	}
+
+	opts, err := p.netOptions(ctx, r.NetworkID)
+	if err != nil {
+		return res, fmt.Errorf("failed to get network options: %w", err)
+	}
+
+	bridge, err := netlink.LinkByName(opts.Bridge)
+	if err != nil {
+		return res, fmt.Errorf("failed to get bridge interface: %w", err)
+	}
+
+	hostName, ctrName := vethPairNames(r.EndpointID)
+	la := netlink.NewLinkAttrs()
+	la.Name = hostName
+	hostLink := &netlink.Veth{
+		LinkAttrs: la,
+		PeerName:  ctrName,
+	}
+	if r.Interface.MacAddress != "" {
+		addr, err := net.ParseMAC(r.Interface.MacAddress)
+		if err != nil {
+			return res, util.ErrMACAddress
+		}
+
+		hostLink.PeerHardwareAddr = addr
+	}
+
+	if err := netlink.LinkAdd(hostLink); err != nil {
+		return res, fmt.Errorf("failed to create veth pair: %w", err)
+	}
+	if err := func() error {
+		if err := netlink.LinkSetUp(hostLink); err != nil {
+			return fmt.Errorf("failed to set host side link of veth pair up: %w", err)
+		}
+
+		ctrLink, err := netlink.LinkByName(ctrName)
+		if err != nil {
+			return fmt.Errorf("failed to find container side of veth pair: %w", err)
+		}
+		if err := netlink.LinkSetUp(ctrLink); err != nil {
+			return fmt.Errorf("failed to set container side link of veth pair up: %w", err)
+		}
+		if r.Interface.MacAddress == "" {
+			// Only write back the MAC address if it wasn't provided to us by libnetwork
+			res.Interface.MacAddress = ctrLink.Attrs().HardwareAddr.String()
+		}
+
+		if err := netlink.LinkSetMaster(hostLink, bridge); err != nil {
+			return fmt.Errorf("failed to attach host side link of veth peer to bridge: %w", err)
+		}
+
+		initialIP := func(v6 bool) error {
+			// TODO: Make this a config option
+			timeoutCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+			defer cancel()
+
+			info, err := udhcpc.GetIP(timeoutCtx, ctrName, &udhcpc.DHCPClientOptions{V6: v6})
+			if err != nil {
+				v6str := ""
+				if v6 {
+					v6str = "v6"
+				}
+				return fmt.Errorf("failed to get initial IP%v address via DHCP%v: %w", v6str, v6str, err)
+			}
+
+			hint := p.gatewayHints[r.EndpointID]
+			if v6 {
+				res.Interface.AddressIPv6 = info.IP
+				hint.V6 = info.Gateway
+			} else {
+				res.Interface.Address = info.IP
+				hint.V4 = info.Gateway
+			}
+			p.gatewayHints[r.EndpointID] = hint
+
+			return nil
+		}
+
+		if err := initialIP(false); err != nil {
+			return err
+		}
+		if opts.IPv6 {
+			if err := initialIP(true); err != nil {
+				return err
+			}
+		}
+
+		return nil
+	}(); err != nil {
+		// Be sure to clean up the veth pair if any of this fails
+		netlink.LinkDel(hostLink)
+		return res, err
+	}
+
+	log.WithFields(log.Fields{
+		"network":  r.NetworkID[:12],
+		"endpoint": r.EndpointID[:12],
+		"ip":       res.Interface.Address,
+		"ipv6":     res.Interface.AddressIPv6,
+		"hints":    fmt.Sprintf("%#v", p.gatewayHints[r.EndpointID]),
+	}).Info("Endpoint created")
+
+	return res, nil
+}
+
+// EndpointOperInfo retrieves some info about an existing endpoint
+func (p *Plugin) EndpointOperInfo(r InfoRequest) (InfoResponse, error) {
+	// TODO: Return some useful information
+	return InfoResponse{}, nil
+}
+
+// DeleteEndpoint deletes the veth pair
+func (p *Plugin) DeleteEndpoint(r DeleteEndpointRequest) error {
+	hostName, _ := vethPairNames(r.EndpointID)
+	link, err := netlink.LinkByName(hostName)
+	if err != nil {
+		return fmt.Errorf("failed to lookup host veth interface %v: %w", hostName, err)
+	}
+
+	if err := netlink.LinkDel(link); err != nil {
+		return fmt.Errorf("failed to delete veth pair: %w", err)
+	}
+
+	log.WithFields(log.Fields{
+		"network":  r.NetworkID[:12],
+		"endpoint": r.EndpointID[:12],
+	}).Info("Endpoint deleted")
+
+	return nil
+}
+
+// Join passes the veth name and route information (gateway from DHCP and existing routes on the host bridge) to Docker
+// and starts a persistent DHCP client to maintain the lease on the acquired IP
+func (p *Plugin) Join(ctx context.Context, r JoinRequest) (JoinResponse, error) {
+	log.WithField("options", r.Options).Debug("Join options")
+	res := JoinResponse{}
+
+	opts, err := p.netOptions(ctx, r.NetworkID)
+	if err != nil {
+		return res, fmt.Errorf("failed to get network options: %w", err)
+	}
+
+	_, ctrName := vethPairNames(r.EndpointID)
+
+	res.InterfaceName = InterfaceName{
+		SrcName:   ctrName,
+		DstPrefix: opts.Bridge,
+	}
+
+	if hint, ok := p.gatewayHints[r.EndpointID]; ok {
+		log.WithFields(log.Fields{
+			"network":    r.NetworkID[:12],
+			"endpoint":   r.EndpointID[:12],
+			"sandbox":    r.SandboxKey,
+			"gateway_v4": hint.V4,
+			"gateway_v6": hint.V6,
+		}).Info("[Join] Setting gateway(s) retrieved from CreateEndpoint")
+		res.Gateway = hint.V4
+		res.GatewayIPv6 = hint.V6
+
+		delete(p.gatewayHints, r.EndpointID)
+	}
+
+	// TODO: Try to intelligently copy existing routes from the bridge
+	// TODO: Start a persistent DHCP client
+
+	log.WithFields(log.Fields{
+		"network":  r.NetworkID[:12],
+		"endpoint": r.EndpointID[:12],
+		"sandbox":  r.SandboxKey,
+	}).Info("Joined sandbox to endpoint")
+
+	return res, nil
+}
+
+// Leave stops the persistent DHCP client for an endpoint
+func (p *Plugin) Leave(ctx context.Context, r LeaveRequest) error {
+	// TODO: Actually stop the DHCP client
+
+	log.WithFields(log.Fields{
+		"network":  r.NetworkID[:12],
+		"endpoint": r.EndpointID[:12],
+	}).Info("Sandbox left endpoint")
+
 	return nil
 }

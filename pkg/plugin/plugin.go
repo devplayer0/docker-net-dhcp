@@ -2,29 +2,35 @@ package plugin
 
 import (
 	"fmt"
-	"io"
 	"net"
 	"net/http"
 
 	docker "github.com/docker/docker/client"
 	"github.com/gorilla/handlers"
-	log "github.com/sirupsen/logrus"
+
+	"github.com/devplayer0/docker-net-dhcp/pkg/util"
 )
 
 // DriverName is the name of the Docker Network Driver
 const DriverName string = "net-dhcp"
 
-func writeAccessLog(w io.Writer, params handlers.LogFormatterParams) {
-	log.WithFields(log.Fields{
-		"status":  params.StatusCode,
-		"resSize": params.Size,
-	}).Debugf("%v %v", params.Request.Method, params.URL.RequestURI())
+// DHCPNetworkOptions contains options for the DHCP network driver
+type DHCPNetworkOptions struct {
+	Bridge string
+	IPv6   bool
+}
+
+type gatewayHint struct {
+	V4 string
+	V6 string
 }
 
 // Plugin is the DHCP network plugin
 type Plugin struct {
 	docker *docker.Client
 	server http.Server
+
+	gatewayHints map[string]gatewayHint
 }
 
 // NewPlugin creates a new Plugin
@@ -36,6 +42,8 @@ func NewPlugin() (*Plugin, error) {
 
 	p := Plugin{
 		docker: client,
+
+		gatewayHints: make(map[string]gatewayHint),
 	}
 
 	mux := http.NewServeMux()
@@ -44,8 +52,15 @@ func NewPlugin() (*Plugin, error) {
 	mux.HandleFunc("/NetworkDriver.CreateNetwork", p.apiCreateNetwork)
 	mux.HandleFunc("/NetworkDriver.DeleteNetwork", p.apiDeleteNetwork)
 
+	mux.HandleFunc("/NetworkDriver.CreateEndpoint", p.apiCreateEndpoint)
+	mux.HandleFunc("/NetworkDriver.EndpointOperInfo", p.apiEndpointOperInfo)
+	mux.HandleFunc("/NetworkDriver.DeleteEndpoint", p.apiDeleteEndpoint)
+
+	mux.HandleFunc("/NetworkDriver.Join", p.apiJoin)
+	mux.HandleFunc("/NetworkDriver.Leave", p.apiLeave)
+
 	p.server = http.Server{
-		Handler: handlers.CustomLoggingHandler(nil, mux, writeAccessLog),
+		Handler: handlers.CustomLoggingHandler(nil, mux, util.WriteAccessLog),
 	}
 
 	return &p, nil
