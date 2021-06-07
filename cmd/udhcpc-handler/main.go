@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"net"
 	"os"
 
 	log "github.com/sirupsen/logrus"
@@ -22,9 +23,13 @@ func main() {
 	switch event.Type {
 	case "bound", "renew":
 		if v6, ok := os.LookupEnv("ipv6"); ok {
-			event.Data.IP = v6
+			// Clean up the IP (udhcpc6 emits a _lot_ of zeros)
+			_, netV6, err := net.ParseCIDR(v6 + "/128")
+			if err != nil {
+				log.WithError(err).Warn("Failed to parse IPv6 address")
+			}
 
-			// TODO: Sort out router and domain options for IPv6
+			event.Data.IP = netV6.String()
 		} else {
 			event.Data.IP = os.Getenv("ip") + "/" + os.Getenv("mask")
 			event.Data.Gateway = os.Getenv("router")

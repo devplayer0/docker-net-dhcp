@@ -2,7 +2,10 @@ package udhcpc
 
 import (
 	"bufio"
+	"bytes"
 	"context"
+	"encoding/binary"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -74,8 +77,20 @@ func NewDHCPClient(iface string, opts *DHCPClientOptions) (*DHCPClient, error) {
 	}
 
 	if opts.Hostname != "" {
-		// TODO: This used to be broken for udhcpc6, is that still the case?
-		c.cmd.Args = append(c.cmd.Args, "-x", "hostname:"+opts.Hostname)
+		hostnameOpt := "hostname:" + opts.Hostname
+		if opts.V6 {
+			// TODO: We encode the fqdn for DHCPv6 because udhcpc6 seems to be broken
+			var data bytes.Buffer
+
+			// flags: S bit set (see RFC4704)
+			binary.Write(&data, binary.BigEndian, uint8(0b0001))
+			binary.Write(&data, binary.BigEndian, uint8(len(opts.Hostname)))
+			data.WriteString(opts.Hostname)
+
+			hostnameOpt = "0x27:" + hex.EncodeToString(data.Bytes())
+		}
+
+		c.cmd.Args = append(c.cmd.Args, "-x", hostnameOpt)
 	}
 
 	// Vendor ID string option is not available for udhcpc6

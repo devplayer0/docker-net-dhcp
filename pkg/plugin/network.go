@@ -204,15 +204,13 @@ func (p *Plugin) CreateEndpoint(ctx context.Context, r CreateEndpointRequest) (C
 				return fmt.Errorf("failed to get initial IP%v address via DHCP%v: %w", v6str, v6str, err)
 			}
 
-			hint := p.gatewayHints[r.EndpointID]
 			if v6 {
 				res.Interface.AddressIPv6 = info.IP
-				hint.V6 = info.Gateway
+				// No gateways in DHCPv6!
 			} else {
 				res.Interface.Address = info.IP
-				hint.V4 = info.Gateway
+				p.gatewayHints[r.EndpointID] = info.Gateway
 			}
-			p.gatewayHints[r.EndpointID] = hint
 
 			return nil
 		}
@@ -290,14 +288,12 @@ func (p *Plugin) Join(ctx context.Context, r JoinRequest) (JoinResponse, error) 
 
 	if hint, ok := p.gatewayHints[r.EndpointID]; ok {
 		log.WithFields(log.Fields{
-			"network":    r.NetworkID[:12],
-			"endpoint":   r.EndpointID[:12],
-			"sandbox":    r.SandboxKey,
-			"gateway_v4": hint.V4,
-			"gateway_v6": hint.V6,
-		}).Info("[Join] Setting gateway(s) retrieved from CreateEndpoint")
-		res.Gateway = hint.V4
-		res.GatewayIPv6 = hint.V6
+			"network":  r.NetworkID[:12],
+			"endpoint": r.EndpointID[:12],
+			"sandbox":  r.SandboxKey,
+			"gateway":  hint,
+		}).Info("[Join] Setting IPv4 gateway retrieved from CreateEndpoint")
+		res.Gateway = hint
 
 		delete(p.gatewayHints, r.EndpointID)
 	}

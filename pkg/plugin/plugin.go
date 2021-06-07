@@ -28,8 +28,9 @@ type DHCPNetworkOptions struct {
 func decodeOpts(input interface{}) (DHCPNetworkOptions, error) {
 	var opts DHCPNetworkOptions
 	optsDecoder, err := mapstructure.NewDecoder(&mapstructure.DecoderConfig{
-		Result:      &opts,
-		ErrorUnused: true,
+		Result:           &opts,
+		ErrorUnused:      true,
+		WeaklyTypedInput: true,
 		DecodeHook: mapstructure.ComposeDecodeHookFunc(
 			mapstructure.StringToTimeDurationHookFunc(),
 		),
@@ -45,17 +46,12 @@ func decodeOpts(input interface{}) (DHCPNetworkOptions, error) {
 	return opts, nil
 }
 
-type gatewayHint struct {
-	V4 string
-	V6 string
-}
-
 // Plugin is the DHCP network plugin
 type Plugin struct {
 	docker *docker.Client
 	server http.Server
 
-	gatewayHints map[string]gatewayHint
+	gatewayHints map[string]string
 }
 
 // NewPlugin creates a new Plugin
@@ -68,7 +64,7 @@ func NewPlugin() (*Plugin, error) {
 	p := Plugin{
 		docker: client,
 
-		gatewayHints: make(map[string]gatewayHint),
+		gatewayHints: make(map[string]string),
 	}
 
 	mux := http.NewServeMux()
