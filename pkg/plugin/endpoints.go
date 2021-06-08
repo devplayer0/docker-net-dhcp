@@ -122,7 +122,7 @@ func (p *Plugin) apiEndpointOperInfo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	res, err := p.EndpointOperInfo(req)
+	res, err := p.EndpointOperInfo(r.Context(), req)
 	if err != nil {
 		util.JSONErrResponse(w, err, 0)
 		return

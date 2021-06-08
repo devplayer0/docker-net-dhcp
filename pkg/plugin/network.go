@@ -6,6 +6,7 @@ import (
 	"net"
 
 	dTypes "github.com/docker/docker/api/types"
+	"github.com/mitchellh/mapstructure"
 	log "github.com/sirupsen/logrus"
 	"github.com/vishvananda/netlink"
 	"golang.org/x/sys/unix"
@@ -250,10 +251,37 @@ func (p *Plugin) CreateEndpoint(ctx context.Context, r CreateEndpointRequest) (C
 	return res, nil
 }
 
+type operInfo struct {
+	Bridge      string `mapstructure:"bridge"`
+	HostVEth    string `mapstructure:"veth_host"`
+	HostVEthMAC string `mapstructure:"veth_host_mac"`
+}
+
 // EndpointOperInfo retrieves some info about an existing endpoint
-func (p *Plugin) EndpointOperInfo(r InfoRequest) (InfoResponse, error) {
-	// TODO: Return some useful information
-	return InfoResponse{}, nil
+func (p *Plugin) EndpointOperInfo(ctx context.Context, r InfoRequest) (InfoResponse, error) {
+	res := InfoResponse{}
+
+	opts, err := p.netOptions(ctx, r.NetworkID)
+	if err != nil {
+		return res, fmt.Errorf("failed to get network options: %w", err)
+	}
+
+	hostName, _ := vethPairNames(r.EndpointID)
+	hostLink, err := netlink.LinkByName(hostName)
+	if err != nil {
+		return res, fmt.Errorf("failed to find host side of veth pair: %w", err)
+	}
+
+	info := operInfo{
+		Bridge:      opts.Bridge,
+		HostVEth:    hostName,
+		HostVEthMAC: hostLink.Attrs().HardwareAddr.String(),
+	}
+	if err := mapstructure.Decode(info, &res.Value); err != nil {
+		return res, fmt.Errorf("failed to encode OperInfo: %w", err)
+	}
+
+	return res, nil
 }
 
 // DeleteEndpoint deletes the veth pair

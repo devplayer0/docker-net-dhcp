@@ -20,6 +20,8 @@ var (
 	ErrNoLease = errors.New("udhcpc did not output a lease")
 	// ErrNoHint indicates missing state from the CreateEndpoint stage in Join
 	ErrNoHint = errors.New("missing CreateEndpoint hints")
+	// ErrNotVEth indicates a host link was unexpectedly not a veth interface
+	ErrNotVEth = errors.New("host link is not a veth interface")
 )
 
 func ErrToStatus(err error) int {
