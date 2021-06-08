@@ -179,8 +179,15 @@ func (p *Plugin) CreateEndpoint(ctx context.Context, r CreateEndpointRequest) (C
 		if err := netlink.LinkSetUp(ctrLink); err != nil {
 			return fmt.Errorf("failed to set container side link of veth pair up: %w", err)
 		}
+
+		// Only write back the MAC address if it wasn't provided to us by libnetwork
 		if r.Interface.MacAddress == "" {
-			// Only write back the MAC address if it wasn't provided to us by libnetwork
+			// The kernel will often reset a randomly assigned MAC address after actions like LinkSetMaster. We prevent
+			// this behaviour by setting it manually to the random value
+			if err := netlink.LinkSetHardwareAddr(ctrLink, ctrLink.Attrs().HardwareAddr); err != nil {
+				return fmt.Errorf("failed to set container side of veth pair's MAC address: %w", err)
+			}
+
 			res.Interface.MacAddress = ctrLink.Attrs().HardwareAddr.String()
 		}
 
@@ -193,20 +200,21 @@ func (p *Plugin) CreateEndpoint(ctx context.Context, r CreateEndpointRequest) (C
 			timeout = opts.LeaseTimeout
 		}
 		initialIP := func(v6 bool) error {
+			v6str := ""
+			if v6 {
+				v6str = "v6"
+			}
+
 			timeoutCtx, cancel := context.WithTimeout(ctx, timeout)
 			defer cancel()
 
 			info, err := udhcpc.GetIP(timeoutCtx, ctrName, &udhcpc.DHCPClientOptions{V6: v6})
 			if err != nil {
-				v6str := ""
-				if v6 {
-					v6str = "v6"
-				}
 				return fmt.Errorf("failed to get initial IP%v address via DHCP%v: %w", v6str, v6str, err)
 			}
 			ip, _, err := net.ParseCIDR(info.IP)
 			if err != nil {
-				return fmt.Errorf("failed to parse initial IP address: %w", err)
+				return fmt.Errorf("failed to parse initial IP%v address: %w", v6str, err)
 			}
 
 			hint := p.joinHints[r.EndpointID]
@@ -241,11 +249,12 @@ func (p *Plugin) CreateEndpoint(ctx context.Context, r CreateEndpointRequest) (C
 	}
 
 	log.WithFields(log.Fields{
-		"network":  r.NetworkID[:12],
-		"endpoint": r.EndpointID[:12],
-		"ip":       res.Interface.Address,
-		"ipv6":     res.Interface.AddressIPv6,
-		"gateway":  fmt.Sprintf("%#v", p.joinHints[r.EndpointID].Gateway),
+		"network":     r.NetworkID[:12],
+		"endpoint":    r.EndpointID[:12],
+		"mac_address": res.Interface.MacAddress,
+		"ip":          res.Interface.Address,
+		"ipv6":        res.Interface.AddressIPv6,
+		"gateway":     fmt.Sprintf("%#v", p.joinHints[r.EndpointID].Gateway),
 	}).Info("Endpoint created")
 
 	return res, nil
