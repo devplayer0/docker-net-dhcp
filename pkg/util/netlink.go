@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/sirupsen/logrus"
+	log "github.com/sirupsen/logrus"
 	"github.com/vishvananda/netlink"
 	"github.com/vishvananda/netns"
 )
@@ -31,7 +31,7 @@ func AwaitNetNS(ctx context.Context, path string, interval time.Duration) (netns
 		return ns, nil
 	case <-ctx.Done():
 		if err != nil {
-			logrus.WithError(err).WithField("path", path).Error("Failed to await network namespace")
+			log.WithError(err).WithField("path", path).Error("Failed to await network namespace")
 		}
 		return dummy, ctx.Err()
 	}
@@ -59,7 +59,7 @@ func AwaitLinkByIndex(ctx context.Context, handle *netlink.Handle, index int, in
 		return link, nil
 	case <-ctx.Done():
 		if err != nil {
-			logrus.WithError(err).WithField("index", index).Error("Failed to await link by index")
+			log.WithError(err).WithField("index", index).Error("Failed to await link by index")
 		}
 		return dummy, ctx.Err()
 	}

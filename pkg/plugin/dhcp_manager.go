@@ -17,6 +17,8 @@ import (
 	"github.com/devplayer0/docker-net-dhcp/pkg/util"
 )
 
+const pollTime = 100 * time.Millisecond
+
 type dhcpManager struct {
 	docker  *docker.Client
 	joinReq JoinRequest
@@ -197,7 +199,7 @@ func (m *dhcpManager) setupClient(v6 bool) (chan error, error) {
 
 func (m *dhcpManager) Start(ctx context.Context) error {
 	var err error
-	m.nsHandle, err = util.AwaitNetNS(ctx, m.joinReq.SandboxKey, 100*time.Millisecond)
+	m.nsHandle, err = util.AwaitNetNS(ctx, m.joinReq.SandboxKey, pollTime)
 	if err != nil {
 		return fmt.Errorf("failed to get sandbox network namespace: %w", err)
 	}
@@ -209,7 +211,7 @@ func (m *dhcpManager) Start(ctx context.Context) error {
 	}
 
 	if err := func() error {
-		hostName, _ := vethPairNames(m.joinReq.EndpointID)
+		hostName, oldCtrName := vethPairNames(m.joinReq.EndpointID)
 		hostLink, err := netlink.LinkByName(hostName)
 		if err != nil {
 			return fmt.Errorf("failed to find host side of veth pair: %w", err)
@@ -224,9 +226,15 @@ func (m *dhcpManager) Start(ctx context.Context) error {
 			return fmt.Errorf("failed to get container side of veth's index: %w", err)
 		}
 
-		m.ctrLink, err = util.AwaitLinkByIndex(ctx, m.netHandle, ctrIndex, 100*time.Millisecond)
-		if err != nil {
-			return fmt.Errorf("failed to get link for container side of veth pair: %w", err)
+		if err := util.AwaitCondition(ctx, func() (bool, error) {
+			m.ctrLink, err = util.AwaitLinkByIndex(ctx, m.netHandle, ctrIndex, pollTime)
+			if err != nil {
+				return false, fmt.Errorf("failed to get link for container side of veth pair: %w", err)
+			}
+
+			return m.ctrLink.Attrs().Name != oldCtrName, nil
+		}, pollTime); err != nil {
+			return err
 		}
 
 		dockerNet, err := m.docker.NetworkInspect(ctx, m.joinReq.NetworkID, dTypes.NetworkInspectOptions{})
