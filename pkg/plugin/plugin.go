@@ -9,6 +9,7 @@ import (
 	docker "github.com/docker/docker/client"
 	"github.com/gorilla/handlers"
 	"github.com/mitchellh/mapstructure"
+	"github.com/vishvananda/netlink"
 
 	"github.com/devplayer0/docker-net-dhcp/pkg/util"
 )
@@ -47,8 +48,8 @@ func decodeOpts(input interface{}) (DHCPNetworkOptions, error) {
 }
 
 type joinHint struct {
-	IPv4    net.IP
-	IPv6    net.IP
+	IPv4    *netlink.Addr
+	IPv6    *netlink.Addr
 	Gateway string
 }
 
@@ -57,7 +58,8 @@ type Plugin struct {
 	docker *docker.Client
 	server http.Server
 
-	joinHints map[string]joinHint
+	joinHints      map[string]joinHint
+	persistentDHCP map[string]*dhcpManager
 }
 
 // NewPlugin creates a new Plugin
@@ -70,7 +72,8 @@ func NewPlugin() (*Plugin, error) {
 	p := Plugin{
 		docker: client,
 
-		joinHints: make(map[string]joinHint),
+		joinHints:      make(map[string]joinHint),
+		persistentDHCP: make(map[string]*dhcpManager),
 	}
 
 	mux := http.NewServeMux()

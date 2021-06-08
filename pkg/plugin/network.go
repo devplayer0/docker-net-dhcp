@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"time"
 
 	dTypes "github.com/docker/docker/api/types"
 	"github.com/mitchellh/mapstructure"
@@ -212,7 +213,7 @@ func (p *Plugin) CreateEndpoint(ctx context.Context, r CreateEndpointRequest) (C
 			if err != nil {
 				return fmt.Errorf("failed to get initial IP%v address via DHCP%v: %w", v6str, v6str, err)
 			}
-			ip, _, err := net.ParseCIDR(info.IP)
+			ip, err := netlink.ParseAddr(info.IP)
 			if err != nil {
 				return fmt.Errorf("failed to parse initial IP%v address: %w", v6str, err)
 			}
@@ -400,8 +401,8 @@ func (p *Plugin) Join(ctx context.Context, r JoinRequest) (JoinResponse, error) 
 			}
 
 			if route.Protocol == unix.RTPROT_KERNEL ||
-				(family == unix.AF_INET && route.Dst.Contains(hint.IPv4)) ||
-				(family == unix.AF_INET6 && route.Dst.Contains(hint.IPv6)) {
+				(family == unix.AF_INET && route.Dst.Contains(hint.IPv4.IP)) ||
+				(family == unix.AF_INET6 && route.Dst.Contains(hint.IPv6.IP)) {
 				// Make sure to leave out the default on-link route created automatically for the IP(s) acquired by DHCP
 				continue
 			}
@@ -446,7 +447,26 @@ func (p *Plugin) Join(ctx context.Context, r JoinRequest) (JoinResponse, error) 
 		}
 	}
 
-	// TODO: Start a persistent DHCP client
+	go func() {
+		// TODO: Make timeout configurable?
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		m := newDHCPManager(p.docker, r, opts)
+		m.LastIP = hint.IPv4
+		m.LastIPv6 = hint.IPv6
+
+		if err := m.Start(ctx); err != nil {
+			log.WithError(err).WithFields(log.Fields{
+				"network":  r.NetworkID[:12],
+				"endpoint": r.EndpointID[:12],
+				"sandbox":  r.SandboxKey,
+			}).Error("Failed to start persistent DHCP client")
+			return
+		}
+
+		p.persistentDHCP[r.EndpointID] = m
+	}()
 
 	log.WithFields(log.Fields{
 		"network":  r.NetworkID[:12],
@@ -459,7 +479,15 @@ func (p *Plugin) Join(ctx context.Context, r JoinRequest) (JoinResponse, error) 
 
 // Leave stops the persistent DHCP client for an endpoint
 func (p *Plugin) Leave(ctx context.Context, r LeaveRequest) error {
-	// TODO: Actually stop the DHCP client
+	manager, ok := p.persistentDHCP[r.EndpointID]
+	if !ok {
+		return util.ErrNoSandbox
+	}
+	delete(p.persistentDHCP, r.EndpointID)
+
+	if err := manager.Stop(); err != nil {
+		return err
+	}
 
 	log.WithFields(log.Fields{
 		"network":  r.NetworkID[:12],

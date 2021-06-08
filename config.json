@@ -29,11 +29,20 @@
             "options": [
                 "bind"
             ]
+        },
+        {
+            "source": "/var/run/docker/netns",
+            "destination": "/run/docker/netns",
+            "type": "bind",
+            "options": [
+                "bind"
+            ]
         }
     ],
     "linux": {
         "capabilities": [
-            "CAP_NET_ADMIN"
+            "CAP_NET_ADMIN",
+            "CAP_SYS_ADMIN"
         ]
     }
 }

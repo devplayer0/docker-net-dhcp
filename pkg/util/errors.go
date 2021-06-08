@@ -22,6 +22,10 @@ var (
 	ErrNoHint = errors.New("missing CreateEndpoint hints")
 	// ErrNotVEth indicates a host link was unexpectedly not a veth interface
 	ErrNotVEth = errors.New("host link is not a veth interface")
+	// ErrNoContainer indicates a container was unexpectedly not found
+	ErrNoContainer = errors.New("couldn't find container by endpoint on the network")
+	// ErrNoSandbox indicates missing state from the Join stage
+	ErrNoSandbox = errors.New("missing joined endpoint state")
 )
 
 func ErrToStatus(err error) int {
