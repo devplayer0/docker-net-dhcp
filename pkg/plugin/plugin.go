@@ -46,12 +46,18 @@ func decodeOpts(input interface{}) (DHCPNetworkOptions, error) {
 	return opts, nil
 }
 
+type joinHint struct {
+	IPv4    net.IP
+	IPv6    net.IP
+	Gateway string
+}
+
 // Plugin is the DHCP network plugin
 type Plugin struct {
 	docker *docker.Client
 	server http.Server
 
-	gatewayHints map[string]string
+	joinHints map[string]joinHint
 }
 
 // NewPlugin creates a new Plugin
@@ -64,7 +70,7 @@ func NewPlugin() (*Plugin, error) {
 	p := Plugin{
 		docker: client,
 
-		gatewayHints: make(map[string]string),
+		joinHints: make(map[string]joinHint),
 	}
 
 	mux := http.NewServeMux()

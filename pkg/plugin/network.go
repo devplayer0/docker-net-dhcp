@@ -203,14 +203,22 @@ func (p *Plugin) CreateEndpoint(ctx context.Context, r CreateEndpointRequest) (C
 				}
 				return fmt.Errorf("failed to get initial IP%v address via DHCP%v: %w", v6str, v6str, err)
 			}
+			ip, _, err := net.ParseCIDR(info.IP)
+			if err != nil {
+				return fmt.Errorf("failed to parse initial IP address: %w", err)
+			}
 
+			hint := p.joinHints[r.EndpointID]
 			if v6 {
 				res.Interface.AddressIPv6 = info.IP
+				hint.IPv6 = ip
 				// No gateways in DHCPv6!
 			} else {
 				res.Interface.Address = info.IP
-				p.gatewayHints[r.EndpointID] = info.Gateway
+				hint.IPv4 = ip
+				hint.Gateway = info.Gateway
 			}
+			p.joinHints[r.EndpointID] = hint
 
 			return nil
 		}
@@ -236,7 +244,7 @@ func (p *Plugin) CreateEndpoint(ctx context.Context, r CreateEndpointRequest) (C
 		"endpoint": r.EndpointID[:12],
 		"ip":       res.Interface.Address,
 		"ipv6":     res.Interface.AddressIPv6,
-		"hints":    fmt.Sprintf("%#v", p.gatewayHints[r.EndpointID]),
+		"gateway":  fmt.Sprintf("%#v", p.joinHints[r.EndpointID].Gateway),
 	}).Info("Endpoint created")
 
 	return res, nil
@@ -286,19 +294,121 @@ func (p *Plugin) Join(ctx context.Context, r JoinRequest) (JoinResponse, error) 
 		DstPrefix: opts.Bridge,
 	}
 
-	if hint, ok := p.gatewayHints[r.EndpointID]; ok {
+	hint, ok := p.joinHints[r.EndpointID]
+	if !ok {
+		return res, util.ErrNoHint
+	}
+	delete(p.joinHints, r.EndpointID)
+
+	if hint.Gateway != "" {
 		log.WithFields(log.Fields{
 			"network":  r.NetworkID[:12],
 			"endpoint": r.EndpointID[:12],
 			"sandbox":  r.SandboxKey,
-			"gateway":  hint,
-		}).Info("[Join] Setting IPv4 gateway retrieved from CreateEndpoint")
-		res.Gateway = hint
-
-		delete(p.gatewayHints, r.EndpointID)
+			"gateway":  hint.Gateway,
+		}).Info("[Join] Setting IPv4 gateway retrieved from initial DHCP in CreateEndpoint")
+		res.Gateway = hint.Gateway
 	}
 
-	// TODO: Try to intelligently copy existing routes from the bridge
+	bridge, err := netlink.LinkByName(opts.Bridge)
+	if err != nil {
+		return res, fmt.Errorf("failed to get bridge interface: %w", err)
+	}
+
+	addRoutes := func(v6 bool) error {
+		family := unix.AF_INET
+		if v6 {
+			family = unix.AF_INET6
+		}
+
+		routes, err := netlink.RouteListFiltered(family, &netlink.Route{
+			LinkIndex: bridge.Attrs().Index,
+			Type:      unix.RTN_UNICAST,
+		}, netlink.RT_FILTER_OIF|netlink.RT_FILTER_TYPE)
+		if err != nil {
+			return fmt.Errorf("failed to list routes: %w", err)
+		}
+
+		for _, route := range routes {
+			log.WithFields(log.Fields{
+				"route": route,
+				"type":  route.Protocol,
+			}).Debug("Route")
+			if route.Dst == nil {
+				// Default route
+				switch family {
+				case unix.AF_INET:
+					if res.Gateway == "" {
+						res.Gateway = route.Gw.String()
+						log.WithFields(log.Fields{
+							"network":  r.NetworkID[:12],
+							"endpoint": r.EndpointID[:12],
+							"sandbox":  r.SandboxKey,
+							"gateway":  res.Gateway,
+						}).Info("[Join] Setting IPv4 gateway retrieved from bridge interface on host routing table")
+					}
+				case unix.AF_INET6:
+					if res.GatewayIPv6 == "" {
+						res.GatewayIPv6 = route.Gw.String()
+						log.WithFields(log.Fields{
+							"network":  r.NetworkID[:12],
+							"endpoint": r.EndpointID[:12],
+							"sandbox":  r.SandboxKey,
+							"gateway":  res.GatewayIPv6,
+						}).Info("[Join] Setting IPv6 gateway retrieved from bridge interface on host routing table")
+					}
+				}
+
+				continue
+			}
+
+			if route.Protocol == unix.RTPROT_KERNEL ||
+				(family == unix.AF_INET && route.Dst.Contains(hint.IPv4)) ||
+				(family == unix.AF_INET6 && route.Dst.Contains(hint.IPv6)) {
+				// Make sure to leave out the default on-link route created automatically for the IP(s) acquired by DHCP
+				continue
+			}
+
+			staticRoute := &StaticRoute{
+				Destination: route.Dst.String(),
+				// Default to an on-link route
+				RouteType: 1,
+			}
+			res.StaticRoutes = append(res.StaticRoutes, staticRoute)
+
+			if route.Gw != nil {
+				staticRoute.RouteType = 0
+				staticRoute.NextHop = route.Gw.String()
+
+				log.WithFields(log.Fields{
+					"network":  r.NetworkID[:12],
+					"endpoint": r.EndpointID[:12],
+					"sandbox":  r.SandboxKey,
+					"route":    staticRoute.Destination,
+					"gateway":  staticRoute.NextHop,
+				}).Info("[Join] Adding route (via gateway) retrieved from bridge interface on host routing table")
+			} else {
+				log.WithFields(log.Fields{
+					"network":  r.NetworkID[:12],
+					"endpoint": r.EndpointID[:12],
+					"sandbox":  r.SandboxKey,
+					"route":    staticRoute.Destination,
+				}).Info("[Join] Adding on-link route retrieved from bridge interface on host routing table")
+			}
+		}
+
+		return nil
+	}
+
+	if err := addRoutes(false); err != nil {
+		return res, err
+	}
+	if opts.IPv6 {
+		if err := addRoutes(true); err != nil {
+			return res, err
+		}
+	}
+
 	// TODO: Start a persistent DHCP client
 
 	log.WithFields(log.Fields{

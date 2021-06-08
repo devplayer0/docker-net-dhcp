@@ -18,6 +18,8 @@ var (
 	ErrMACAddress = errors.New("invalid MAC address")
 	// ErrNoLease indicates a DHCP lease was not obtained from udhcpc
 	ErrNoLease = errors.New("udhcpc did not output a lease")
+	// ErrNoHint indicates missing state from the CreateEndpoint stage in Join
+	ErrNoHint = errors.New("missing CreateEndpoint hints")
 )
 
 func ErrToStatus(err error) int {
