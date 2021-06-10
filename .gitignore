@@ -1,5 +1,6 @@
 /bin/*
 !/bin/.gitkeep
 /plugin/
+/multiarch/
 
 .vscode/

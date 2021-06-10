@@ -1,5 +1,6 @@
 PLUGIN_NAME = ghcr.io/devplayer0/docker-net-dhcp
 PLUGIN_TAG ?= golang
+PLATFORMS ?= linux/amd64,linux/arm64
 
 SOURCES = $(shell find pkg/ cmd/ -name '*.go')
 BINARY = bin/net-dhcp
@@ -42,6 +43,13 @@ pdebug: create enable
 push: create
 	docker plugin push $(PLUGIN_NAME):$(PLUGIN_TAG)
 
+multiarch: $(SOURCES)
+	docker buildx build --platform=$(PLATFORMS) -o type=local,dest=$@ .
+
+push-multiarch: multiarch config.json
+	scripts/push_multiarch_plugin.py -p $(PLATFORMS) config.json multiarch $(PLUGIN_NAME):$(PLUGIN_TAG)
+
 clean:
-	-rm -rf ./plugin
+	-rm -rf multiarch/
+	-rm -rf plugin/
 	-rm bin/*

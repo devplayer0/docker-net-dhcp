@@ -1,0 +1,2 @@
+python-dxf>7, <8
+docker-image-py>0.1,<0.2
