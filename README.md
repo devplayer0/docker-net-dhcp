@@ -119,6 +119,13 @@ Note:
    container) when necessary - **this client runs separately from the container**
  - Use `--mac-address` to specify a MAC address if you've configured reserved IP addresses on your DHCP server, or if
    you want a container to re-use an old lease
+ - If the `docker run` command times out waiting for a lease, you can try increasing the initial timeout value by
+   passing `-o lease_timeout=60s` (e.g. to increase to 60 seconds)
+
+## Debugging
+
+To read the plugin's log, do `cat /var/lib/docker/plugins/*/rootfs/var/log/net-dhcp.log` (as `root`). You can also use
+`docker plugin set ghcr.io/devplayer0/docker-net-dhcp:release-linux-amd64 LOG_LEVEL=trace` to increase log verbosity.
 
 # Implementation
 
