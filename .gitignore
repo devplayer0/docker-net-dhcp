@@ -4,3 +4,4 @@
 /multiarch/
 
 .vscode/
+__pycache__/
