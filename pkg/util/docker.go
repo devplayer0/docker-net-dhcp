@@ -35,7 +35,7 @@ func AwaitContainerInspect(ctx context.Context, docker *client.Client, id string
 		return link, nil
 	case <-ctx.Done():
 		if err != nil {
-			log.WithError(err).WithField("id", id).Error("Failed to await container by index")
+			log.WithError(err).WithField("id", id).Error("Failed to await container by ID")
 		}
 		return dummy, ctx.Err()
 	}

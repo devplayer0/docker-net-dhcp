@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"strings"
 	"time"
 
 	dTypes "github.com/docker/docker/api/types"
@@ -199,20 +200,27 @@ func (m *dhcpManager) setupClient(v6 bool) (chan error, error) {
 }
 
 func (m *dhcpManager) Start(ctx context.Context) error {
-	dockerNet, err := m.docker.NetworkInspect(ctx, m.joinReq.NetworkID, dTypes.NetworkInspectOptions{})
-	if err != nil {
-		return fmt.Errorf("failed to get Docker network info: %w", err)
-	}
-
 	var ctrID string
-	for id, info := range dockerNet.Containers {
-		if info.EndpointID == m.joinReq.EndpointID {
-			ctrID = id
-			break
+	if err := util.AwaitCondition(ctx, func() (bool, error) {
+		dockerNet, err := m.docker.NetworkInspect(ctx, m.joinReq.NetworkID, dTypes.NetworkInspectOptions{})
+		if err != nil {
+			return false, fmt.Errorf("failed to get Docker network info: %w", err)
 		}
-	}
-	if ctrID == "" {
-		return util.ErrNoContainer
+
+		for id, info := range dockerNet.Containers {
+			if info.EndpointID == m.joinReq.EndpointID {
+				ctrID = id
+				break
+			}
+		}
+		if ctrID == "" {
+			return false, util.ErrNoContainer
+		}
+
+		// Seems like Docker makes the container ID just the endpoint until it's ready
+		return !strings.HasPrefix(ctrID, "ep-"), nil
+	}, pollTime); err != nil {
+		return err
 	}
 
 	ctr, err := util.AwaitContainerInspect(ctx, m.docker, ctrID, pollTime)
