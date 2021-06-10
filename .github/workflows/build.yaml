@@ -10,6 +10,7 @@ jobs:
     runs-on: ubuntu-20.04
 
     env:
+      PLUGIN_NAME: ghcr.io/devplayer0/docker-net-dhcp
       PLATFORMS: linux/amd64,linux/386,linux/arm64,linux/arm/v7
 
     steps:
@@ -37,4 +38,6 @@ jobs:
         env:
           REGISTRY_USERNAME: ${{ github.actor }}
           REGISTRY_PASSWORD: ${{ secrets.GITHUB_TOKEN }}
-        run: make PLUGIN_TAG=${{ steps.vars.outputs.tag }} push-multiarch
+        run: |
+          make PLUGIN_TAG=${{ steps.vars.outputs.tag }} push-multiarch
+          scripts/tag_multiarch_plugin.py -p "$PLATFORMS" "$PLUGIN_NAME:${{ steps.vars.outputs.tag }}" latest
