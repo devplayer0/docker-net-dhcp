@@ -90,10 +90,19 @@ class DXF(dxf.DXF):
         self.set_manifest(ref, mf, mime=mime)
         return size, digest
 
-def fix_slash(info: tarfile.TarInfo):
-    if info.name == '':
-        info.name = '.'
-    return info
+def tar_filter(p: Platform):
+    def f(info: tarfile.TarInfo):
+        # Ensure there's no directory called '/'
+        if info.name == '':
+            info.name = '.'
+
+        # buildx messes up symlink targets...
+        platform_prefix = f'/{p.dirname}'
+        if info.issym() and info.linkname.startswith(platform_prefix):
+            info.linkname = info.linkname[len(platform_prefix):]
+
+        return info
+    return f
 
 def main():
     parser = argparse.ArgumentParser(description='Construct and push a multiarch Docker plugin')
@@ -127,7 +136,7 @@ def main():
                 with tarfile.open(name=tar_name, mode='w', fileobj=gz) as tar:
                     path = os.path.join(args.rootfs, p.dirname)
                     print(f"tar'ing and gzip'ing {path}")
-                    tar.add(path, arcname='', filter=fix_slash)
+                    tar.add(path, arcname='', filter=tar_filter(p))
             f.seek(0, os.SEEK_SET)
 
             sha256 = hashlib.sha256()
