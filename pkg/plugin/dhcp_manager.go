@@ -124,6 +124,10 @@ func (m *dhcpManager) setupClient(v6 bool) (chan error, error) {
 		v6Str = "v6"
 	}
 
+	log.
+		WithFields(m.logFields(v6)).
+		Info("Starting persistent DHCP client")
+
 	client, err := udhcpc.NewDHCPClient(m.ctrLink.Attrs().Name, &udhcpc.DHCPClientOptions{
 		Hostname:  m.hostname,
 		V6:        v6,
@@ -185,9 +189,11 @@ func (m *dhcpManager) setupClient(v6 bool) (chan error, error) {
 				}
 
 			case <-m.stopChan:
-				log.WithFields(m.logFields(v6)).Info("Shutting down persistent DHCP client")
+				log.
+					WithFields(m.logFields(v6)).
+					Info("Shutting down persistent DHCP client")
 
-				ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 				defer cancel()
 
 				errChan <- client.Finish(ctx)
