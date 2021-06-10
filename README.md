@@ -67,6 +67,9 @@ $ sudo ip link set eth0 up
 # Attach your network card to the bridge
 $ sudo ip link set eth0 master my-bridge
 
+# If your firewall's policy for forwarding is to drop packets, you'll need to add an ACCEPT rule
+$ sudo iptables -A FORWARD -i my-bridge -j ACCEPT
+
 # Get an IP for the host (will go out to the DHCP server since eth0 is attached to the bridge)
 # Replace this step with whatever network configuration you were using for eth0
 $ sudo dhcpcd my-bridge
