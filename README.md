@@ -17,8 +17,8 @@ The plugin can be installed with the `docker plugin install` command:
 $ docker plugin install ghcr.io/devplayer0/docker-net-dhcp:release-linux-amd64
 Plugin "ghcr.io/devplayer0/docker-net-dhcp:release-linux-amd64" is requesting the following privileges:
  - network: [host]
+ - host pid namespace: [true]
  - mount: [/var/run/docker.sock]
- - mount: [/var/run/docker]
  - capabilities: [CAP_NET_ADMIN CAP_SYS_ADMIN]
 Do you grant the above permissions? [y/N] y
 release-linux-amd64: Pulling from ghcr.io/devplayer0/docker-net-dhcp

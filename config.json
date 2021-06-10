@@ -21,18 +21,11 @@
     "network": {
         "type": "host"
     },
+    "pidhost": true,
     "mounts": [
         {
             "source": "/var/run/docker.sock",
             "destination": "/run/docker.sock",
-            "type": "bind",
-            "options": [
-                "bind"
-            ]
-        },
-        {
-            "source": "/var/run/docker",
-            "destination": "/run/docker",
             "type": "bind",
             "options": [
                 "bind"

@@ -27,6 +27,7 @@ type dhcpManager struct {
 	LastIP   *netlink.Addr
 	LastIPv6 *netlink.Addr
 
+	nsPath    string
 	hostname  string
 	nsHandle  netns.NsHandle
 	netHandle *netlink.Handle
@@ -125,7 +126,7 @@ func (m *dhcpManager) setupClient(v6 bool) (chan error, error) {
 	client, err := udhcpc.NewDHCPClient(m.ctrLink.Attrs().Name, &udhcpc.DHCPClientOptions{
 		Hostname:  m.hostname,
 		V6:        v6,
-		Namespace: m.joinReq.SandboxKey,
+		Namespace: m.nsPath,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to create DHCP%v client: %w", v6Str, err)
@@ -198,8 +199,32 @@ func (m *dhcpManager) setupClient(v6 bool) (chan error, error) {
 }
 
 func (m *dhcpManager) Start(ctx context.Context) error {
-	var err error
-	m.nsHandle, err = util.AwaitNetNS(ctx, m.joinReq.SandboxKey, pollTime)
+	dockerNet, err := m.docker.NetworkInspect(ctx, m.joinReq.NetworkID, dTypes.NetworkInspectOptions{})
+	if err != nil {
+		return fmt.Errorf("failed to get Docker network info: %w", err)
+	}
+
+	var ctrID string
+	for id, info := range dockerNet.Containers {
+		if info.EndpointID == m.joinReq.EndpointID {
+			ctrID = id
+			break
+		}
+	}
+	if ctrID == "" {
+		return util.ErrNoContainer
+	}
+
+	ctr, err := m.docker.ContainerInspect(ctx, ctrID)
+	if err != nil {
+		return fmt.Errorf("failed to get Docker container info: %w", err)
+	}
+
+	// Using the "sandbox key" directly causes issues on some platforms
+	m.nsPath = fmt.Sprintf("/proc/%v/ns/net", ctr.State.Pid)
+	m.hostname = ctr.Config.Hostname
+
+	m.nsHandle, err = util.AwaitNetNS(ctx, m.nsPath, pollTime)
 	if err != nil {
 		return fmt.Errorf("failed to get sandbox network namespace: %w", err)
 	}
@@ -236,28 +261,6 @@ func (m *dhcpManager) Start(ctx context.Context) error {
 		}, pollTime); err != nil {
 			return err
 		}
-
-		dockerNet, err := m.docker.NetworkInspect(ctx, m.joinReq.NetworkID, dTypes.NetworkInspectOptions{})
-		if err != nil {
-			return fmt.Errorf("failed to get Docker network info: %w", err)
-		}
-
-		var ctrID string
-		for id, info := range dockerNet.Containers {
-			if info.EndpointID == m.joinReq.EndpointID {
-				ctrID = id
-				break
-			}
-		}
-		if ctrID == "" {
-			return util.ErrNoContainer
-		}
-
-		ctr, err := m.docker.ContainerInspect(ctx, ctrID)
-		if err != nil {
-			return fmt.Errorf("failed to get Docker container info: %w", err)
-		}
-		m.hostname = ctr.Config.Hostname
 
 		if m.errChan, err = m.setupClient(false); err != nil {
 			close(m.stopChan)
