@@ -6,8 +6,18 @@
             "docker.networkdriver/1.0"
         ]
     },
-    "entrypoint": [ "python", "-m", "net_dhcp" ],
-    "workdir": "/opt/plugin",
+    "entrypoint": ["/usr/sbin/net-dhcp", "-logfile", "/var/log/net-dhcp.log"],
+    "env": [
+        {
+            "description": "Log level",
+            "name": "LOG_LEVEL",
+            "value": "info",
+            "settable": [
+                "value"
+            ]
+        }
+    ],
+    "workdir": "/",
     "network": {
         "type": "host"
     },
@@ -19,15 +29,20 @@
             "options": [
                 "bind"
             ]
+        },
+        {
+            "source": "/var/run/docker",
+            "destination": "/run/docker",
+            "type": "bind",
+            "options": [
+                "bind"
+            ]
         }
     ],
-    "pidhost": true,
     "linux": {
         "capabilities": [
             "CAP_NET_ADMIN",
-            "CAP_SYS_ADMIN",
-            "CAP_SYS_PTRACE",
-            "CAP_SYS_RESOURCE"
+            "CAP_SYS_ADMIN"
         ]
     }
 }

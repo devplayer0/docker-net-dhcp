@@ -1,12 +1,19 @@
-FROM python:3-alpine
+FROM golang:1.16-alpine3.13 AS builder
 
-COPY requirements.txt /opt/
-RUN apk --no-cache add gcc musl-dev && \
-    pip install -r /opt/requirements.txt && \
-    apk --no-cache del gcc musl-dev
+WORKDIR /usr/local/src/docker-net-dhcp
+COPY go.* ./
+RUN go mod download
 
-RUN mkdir -p /opt/plugin /run/docker/plugins /var/run/docker/netns
-COPY net-dhcp/ /opt/plugin/net_dhcp
+COPY cmd/ ./cmd/
+COPY pkg/ ./pkg/
+RUN mkdir bin/ && go build -o bin/ ./cmd/...
 
-WORKDIR /opt/plugin
-ENTRYPOINT ["python", "-m", "net_dhcp"]
+
+FROM alpine:3.13
+
+RUN mkdir -p /run/docker/plugins
+
+COPY --from=builder /usr/local/src/docker-net-dhcp/bin/net-dhcp /usr/sbin/
+COPY --from=builder /usr/local/src/docker-net-dhcp/bin/udhcpc-handler /usr/lib/net-dhcp/udhcpc-handler
+
+ENTRYPOINT ["/usr/sbin/net-dhcp"]

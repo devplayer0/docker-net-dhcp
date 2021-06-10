@@ -1,0 +1,40 @@
+name: Build
+
+on:
+  push:
+    branches:
+      - golang
+
+jobs:
+  docker:
+    runs-on: ubuntu-20.04
+
+    env:
+      PLATFORMS: linux/amd64,linux/386,linux/arm64,linux/arm/v7
+
+    steps:
+      - uses: actions/checkout@v2
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v1
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v1
+
+      - name: Install script dependencies
+        run: pip3 install -r scripts/requirements.txt
+
+      - id: vars
+        name: Generate build vars
+        run: |
+          SHA="${{ github.sha }}"
+          echo "::set-output name=tag::"${SHA:0:8}-$(date +%s)Z""
+
+      - name: Build
+        run: make PLUGIN_TAG=${{ steps.vars.outputs.tag }} multiarch
+
+      - name: Push
+        env:
+          REGISTRY_USERNAME: ${{ github.actor }}
+          REGISTRY_PASSWORD: ${{ secrets.GITHUB_TOKEN }}
+        run: make PLUGIN_TAG=${{ steps.vars.outputs.tag }} push-multiarch
