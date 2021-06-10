@@ -215,7 +215,7 @@ func (m *dhcpManager) Start(ctx context.Context) error {
 		return util.ErrNoContainer
 	}
 
-	ctr, err := m.docker.ContainerInspect(ctx, ctrID)
+	ctr, err := util.AwaitContainerInspect(ctx, m.docker, ctrID, pollTime)
 	if err != nil {
 		return fmt.Errorf("failed to get Docker container info: %w", err)
 	}
