@@ -4,6 +4,7 @@ import (
 	"flag"
 	"os"
 	"os/signal"
+	"time"
 
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/sys/unix"
@@ -42,7 +43,15 @@ func main() {
 		log.StandardLogger().Out = f
 	}
 
-	p, err := plugin.NewPlugin()
+	awaitTimeout := 5 * time.Second
+	if t, ok := os.LookupEnv("AWAIT_TIMEOUT"); ok {
+		awaitTimeout, err = time.ParseDuration(t)
+		if err != nil {
+			log.WithError(err).Fatal("Failed to parse await timeout")
+		}
+	}
+
+	p, err := plugin.NewPlugin(awaitTimeout)
 	if err != nil {
 		log.WithError(err).Fatal("Failed to create plugin")
 	}

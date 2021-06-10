@@ -55,6 +55,8 @@ type joinHint struct {
 
 // Plugin is the DHCP network plugin
 type Plugin struct {
+	awaitTimeout time.Duration
+
 	docker *docker.Client
 	server http.Server
 
@@ -63,13 +65,15 @@ type Plugin struct {
 }
 
 // NewPlugin creates a new Plugin
-func NewPlugin() (*Plugin, error) {
+func NewPlugin(awaitTimeout time.Duration) (*Plugin, error) {
 	client, err := docker.NewClient("unix:///run/docker.sock", "v1.13.1", nil, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create docker client: %w", err)
 	}
 
 	p := Plugin{
+		awaitTimeout: awaitTimeout,
+
 		docker: client,
 
 		joinHints:      make(map[string]joinHint),

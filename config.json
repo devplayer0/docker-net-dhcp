@@ -15,6 +15,14 @@
             "settable": [
                 "value"
             ]
+        },
+        {
+            "description": "Log level",
+            "name": "AWAIT_TIMEOUT",
+            "value": "10s",
+            "settable": [
+                "value"
+            ]
         }
     ],
     "workdir": "/",

@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"net"
-	"time"
 
 	dTypes "github.com/docker/docker/api/types"
 	"github.com/mitchellh/mapstructure"
@@ -441,8 +440,7 @@ func (p *Plugin) Join(ctx context.Context, r JoinRequest) (JoinResponse, error) 
 	}
 
 	go func() {
-		// TODO: Make timeout configurable?
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), p.awaitTimeout)
 		defer cancel()
 
 		m := newDHCPManager(p.docker, r, opts)
