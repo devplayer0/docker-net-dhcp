@@ -19,7 +19,7 @@ Plugin "ghcr.io/devplayer0/docker-net-dhcp:release-linux-amd64" is requesting th
  - network: [host]
  - host pid namespace: [true]
  - mount: [/var/run/docker.sock]
- - capabilities: [CAP_NET_ADMIN CAP_SYS_ADMIN]
+ - capabilities: [CAP_NET_ADMIN CAP_SYS_ADMIN CAP_SYS_PTRACE]
 Do you grant the above permissions? [y/N] y
 release-linux-amd64: Pulling from ghcr.io/devplayer0/docker-net-dhcp
 Digest: sha256:<some hash>
