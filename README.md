@@ -28,6 +28,8 @@ Installed plugin ghcr.io/devplayer0/docker-net-dhcp:release-linux-amd64
 $
 ```
 
+Note: If you get an error like `invalid rootfs in image configuration`, try upgrading your Docker installation.
+
 ## Other tags
 
 There are a number of supported tags for different architectures and versions, the format is
@@ -54,6 +56,7 @@ Currently only `linux` is supported.
 Unfortunately Docker plugin images don't support multiple architectures per tag.
 
 ## Network creation
+
 In order to create a Docker network using `net-dhcp`, you'll need a pre-configured bridge interface on the host. How you
 set this up will depend on your system, but the following (manual) instructions should work on most Linux distros:
 
