@@ -113,14 +113,59 @@ default via 10.255.0.123 dev my-bridge0
 / #
 ```
 
+Or, in a Docker Compose file:
+
+```yaml
+version: '3'
+services:
+  app:
+    hostname: my-http
+    image: nginx
+    mac_address: 86:41:68:f8:85:b9
+    networks:
+      - dhcp
+networks:
+  dhcp:
+    external:
+      name: my-dhcp-net
+```
+
+The above Compose file assumes your network has already been created with `docker network create`. **This is the
+recommended way to use `docker-net-dhcp`**, since it allows the network to be shared among multiple compose projects and
+other containers. However, you can also create the network as part of the Compose definition. In this case Docker
+Compose will manage the network itself (for example deleting it when `docker-compose down` is run).
+
+```yaml
+version: '3'
+services:
+  app:
+    image: nginx
+    hostname: my-server
+    networks:
+      - dhcp
+networks:
+  dhcp:
+    driver: ghcr.io/devplayer0/docker-net-dhcp:golang
+    driver_opts:
+      bridge: my-bridge
+    ipam:
+      driver: 'null'
+```
+
 Note:
  - It will take a bit longer than usual for the container to start, as a DHCP lease needs to be obtained before creating it
  - Once created, a persistent DHCP client will renew the DHCP lease (and then update the default gateway in the
    container) when necessary - **this client runs separately from the container**
  - Use `--mac-address` to specify a MAC address if you've configured reserved IP addresses on your DHCP server, or if
    you want a container to re-use an old lease
+ - Add `--hostname my-host` to have the DHCP transmit this name as the host for the container. This is useful if your
+   DHCP server is configured to update DNS records from DHCP leases.
  - If the `docker run` command times out waiting for a lease, you can try increasing the initial timeout value by
    passing `-o lease_timeout=60s` (e.g. to increase to 60 seconds)
+
+## Docker Compose
+
+Sample Docker Compose file:
 
 ## Debugging
 
