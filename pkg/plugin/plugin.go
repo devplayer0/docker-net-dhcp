@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"regexp"
 	"time"
 
 	docker "github.com/docker/docker/client"
@@ -18,6 +19,13 @@ import (
 const DriverName string = "net-dhcp"
 
 const defaultLeaseTimeout = 10 * time.Second
+
+var driverRegexp = regexp.MustCompile(`^ghcr\.io/devplayer0/docker-net-dhcp:.+$`)
+
+// IsDHCPPlugin checks if a Docker network driver is an instance of this plugin
+func IsDHCPPlugin(driver string) bool {
+	return driverRegexp.MatchString(driver)
+}
 
 // DHCPNetworkOptions contains options for the DHCP network driver
 type DHCPNetworkOptions struct {

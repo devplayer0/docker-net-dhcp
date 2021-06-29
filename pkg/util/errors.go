@@ -10,8 +10,8 @@ var (
 	ErrIPAM = errors.New("only the null IPAM driver is supported")
 	// ErrBridgeRequired indicates a network bridge was not provided for network creation
 	ErrBridgeRequired = errors.New("bridge required")
-	// ErrBridgeNotFound indicates that a bridge could not be found
-	ErrBridgeNotFound = errors.New("bridge not found")
+	// ErrNotBridge indicates that the provided network interface is not a bridge
+	ErrNotBridge = errors.New("network interface is not a bridge")
 	// ErrBridgeUsed indicates that a bridge is already in use
 	ErrBridgeUsed = errors.New("bridge already in use by Docker")
 	// ErrMACAddress indicates an invalid MAC address
@@ -30,7 +30,7 @@ var (
 
 func ErrToStatus(err error) int {
 	switch {
-	case errors.Is(err, ErrIPAM), errors.Is(err, ErrBridgeRequired), errors.Is(err, ErrBridgeNotFound),
+	case errors.Is(err, ErrIPAM), errors.Is(err, ErrBridgeRequired), errors.Is(err, ErrNotBridge),
 		errors.Is(err, ErrBridgeUsed), errors.Is(err, ErrMACAddress):
 		return http.StatusBadRequest
 	default:
