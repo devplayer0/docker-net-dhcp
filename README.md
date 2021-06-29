@@ -87,7 +87,7 @@ $
 
 # With IPv6 enabled
 # Although `docker network create` has a `--ipv6` flag, it doesn't work with the null IPAM driver
-$ docker network create -d ghcr.io/devplayer0/docker-net-dhcp:release-linux-amd64 --ipam-driver null -o bridge=test -o ipv6=true my-dhcp-net
+$ docker network create -d ghcr.io/devplayer0/docker-net-dhcp:release-linux-amd64 --ipam-driver null -o bridge=my-bridge -o ipv6=true my-dhcp-net
 <some network id>
 $
 ```
@@ -148,9 +148,11 @@ services:
       - dhcp
 networks:
   dhcp:
-    driver: ghcr.io/devplayer0/docker-net-dhcp:golang
+    driver: ghcr.io/devplayer0/docker-net-dhcp:release-linux-amd64
     driver_opts:
       bridge: my-bridge
+      ipv6: 'true'
+      ignore_conflicts: 'false'
     ipam:
       driver: 'null'
 ```
@@ -164,11 +166,10 @@ Note:
  - Add `--hostname my-host` to have the DHCP transmit this name as the host for the container. This is useful if your
    DHCP server is configured to update DNS records from DHCP leases.
  - If the `docker run` command times out waiting for a lease, you can try increasing the initial timeout value by
-   passing `-o lease_timeout=60s` (e.g. to increase to 60 seconds)
-
-## Docker Compose
-
-Sample Docker Compose file:
+   passing `-o lease_timeout=60s` when creating the network (e.g. to increase to 60 seconds)
+ - By default, a bridge can only be used for a single DHCP network. There is additionally a check to see if a bridge is
+	is used by any other Docker networks. To disable this check (it's also possible this check might mistakenly detect a
+  conflict), pass `-o ignore_conflicts=true` when creating the network.
 
 ## Debugging
 
