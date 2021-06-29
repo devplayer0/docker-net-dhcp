@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"regexp"
 	"time"
 
 	docker "github.com/docker/docker/client"
@@ -19,11 +20,19 @@ const DriverName string = "net-dhcp"
 
 const defaultLeaseTimeout = 10 * time.Second
 
+var driverRegexp = regexp.MustCompile(`^ghcr\.io/devplayer0/docker-net-dhcp:.+$`)
+
+// IsDHCPPlugin checks if a Docker network driver is an instance of this plugin
+func IsDHCPPlugin(driver string) bool {
+	return driverRegexp.MatchString(driver)
+}
+
 // DHCPNetworkOptions contains options for the DHCP network driver
 type DHCPNetworkOptions struct {
-	Bridge       string
-	IPv6         bool
-	LeaseTimeout time.Duration `mapstructure:"lease_timeout"`
+	Bridge          string
+	IPv6            bool
+	LeaseTimeout    time.Duration `mapstructure:"lease_timeout"`
+	IgnoreConflicts bool          `mapstructure:"ignore_conflicts"`
 }
 
 func decodeOpts(input interface{}) (DHCPNetworkOptions, error) {

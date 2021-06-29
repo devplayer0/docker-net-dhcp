@@ -1,6 +1,7 @@
 package plugin
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"net"
@@ -41,53 +42,65 @@ func (p *Plugin) CreateNetwork(r CreateNetworkRequest) error {
 		}
 	}
 
-	links, err := netlink.LinkList()
+	link, err := netlink.LinkByName(opts.Bridge)
 	if err != nil {
-		return fmt.Errorf("failed to retrieve list of network interfaces: %w", err)
+		return fmt.Errorf("failed to lookup interface %v: %w", opts.Bridge, err)
+	}
+	if link.Type() != "bridge" {
+		return util.ErrNotBridge
 	}
 
-	nets, err := p.docker.NetworkList(context.Background(), dTypes.NetworkListOptions{})
-	if err != nil {
-		return fmt.Errorf("failed to retrieve list of networks from Docker: %w", err)
-	}
-
-	found := false
-	for _, l := range links {
-		attrs := l.Attrs()
-		if l.Type() != "bridge" || attrs.Name != opts.Bridge {
-			continue
-		}
-
-		v4Addrs, err := netlink.AddrList(l, unix.AF_INET)
+	if !opts.IgnoreConflicts {
+		v4Addrs, err := netlink.AddrList(link, unix.AF_INET)
 		if err != nil {
-			return fmt.Errorf("failed to retrieve IPv4 addresses for %v: %w", attrs.Name, err)
+			return fmt.Errorf("failed to retrieve IPv4 addresses for %v: %w", opts.Bridge, err)
 		}
-		v6Addrs, err := netlink.AddrList(l, unix.AF_INET6)
+		v6Addrs, err := netlink.AddrList(link, unix.AF_INET6)
 		if err != nil {
-			return fmt.Errorf("failed to retrieve IPv6 addresses for %v: %w", attrs.Name, err)
+			return fmt.Errorf("failed to retrieve IPv6 addresses for %v: %w", opts.Bridge, err)
 		}
-		addrs := append(v4Addrs, v6Addrs...)
+		bridgeAddrs := append(v4Addrs, v6Addrs...)
+
+		nets, err := p.docker.NetworkList(context.Background(), dTypes.NetworkListOptions{})
+		if err != nil {
+			return fmt.Errorf("failed to retrieve list of networks from Docker: %w", err)
+		}
 
 		// Make sure the addresses on this bridge aren't used by another network
 		for _, n := range nets {
+			if IsDHCPPlugin(n.Driver) {
+				otherOpts, err := decodeOpts(n.Options)
+				if err != nil {
+					log.
+						WithField("network", n.Name).
+						WithError(err).
+						Warn("Failed to parse other DHCP network's options")
+				} else if otherOpts.Bridge == opts.Bridge {
+					return util.ErrBridgeUsed
+				}
+			}
+			if n.IPAM.Driver == "null" {
+				// Null driver networks will have 0.0.0.0/0 which covers any address range!
+				continue
+			}
+
 			for _, c := range n.IPAM.Config {
-				_, cidr, err := net.ParseCIDR(c.Subnet)
+				_, dockerCIDR, err := net.ParseCIDR(c.Subnet)
 				if err != nil {
 					return fmt.Errorf("failed to parse subnet %v on Docker network %v: %w", c.Subnet, n.ID, err)
 				}
+				if bytes.Equal(dockerCIDR.Mask, net.CIDRMask(0, 32)) || bytes.Equal(dockerCIDR.Mask, net.CIDRMask(0, 128)) {
+					// Last check to make sure the network isn't 0.0.0.0/0 or ::/0 (which would always pass the check below)
+					continue
+				}
 
-				for _, linkAddr := range addrs {
-					if linkAddr.IPNet.Contains(cidr.IP) || cidr.Contains(linkAddr.IP) {
+				for _, bridgeAddr := range bridgeAddrs {
+					if bridgeAddr.IPNet.Contains(dockerCIDR.IP) || dockerCIDR.Contains(bridgeAddr.IP) {
 						return util.ErrBridgeUsed
 					}
 				}
 			}
 		}
-		found = true
-		break
-	}
-	if !found {
-		return util.ErrBridgeNotFound
 	}
 
 	log.WithFields(log.Fields{
