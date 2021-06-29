@@ -29,9 +29,10 @@ func IsDHCPPlugin(driver string) bool {
 
 // DHCPNetworkOptions contains options for the DHCP network driver
 type DHCPNetworkOptions struct {
-	Bridge       string
-	IPv6         bool
-	LeaseTimeout time.Duration `mapstructure:"lease_timeout"`
+	Bridge          string
+	IPv6            bool
+	LeaseTimeout    time.Duration `mapstructure:"lease_timeout"`
+	IgnoreConflicts bool          `mapstructure:"ignore_conflicts"`
 }
 
 func decodeOpts(input interface{}) (DHCPNetworkOptions, error) {
