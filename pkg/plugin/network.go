@@ -326,7 +326,7 @@ func (p *Plugin) DeleteEndpoint(r DeleteEndpointRequest) error {
 	return nil
 }
 
-func (p *Plugin) addRoutes(v6 bool, bridge netlink.Link, r JoinRequest, hint joinHint, res *JoinResponse) error {
+func (p *Plugin) addRoutes(opts *DHCPNetworkOptions, v6 bool, bridge netlink.Link, r JoinRequest, hint joinHint, res *JoinResponse) error {
 	family := unix.AF_INET
 	if v6 {
 		family = unix.AF_INET6
@@ -367,6 +367,11 @@ func (p *Plugin) addRoutes(v6 bool, bridge netlink.Link, r JoinRequest, hint joi
 				}
 			}
 
+			continue
+		}
+
+		if opts.SkipRoutes {
+			// Don't do static routes at all
 			continue
 		}
 
@@ -443,11 +448,11 @@ func (p *Plugin) Join(ctx context.Context, r JoinRequest) (JoinResponse, error) 
 		return res, fmt.Errorf("failed to get bridge interface: %w", err)
 	}
 
-	if err := p.addRoutes(false, bridge, r, hint, &res); err != nil {
+	if err := p.addRoutes(&opts, false, bridge, r, hint, &res); err != nil {
 		return res, err
 	}
 	if opts.IPv6 {
-		if err := p.addRoutes(true, bridge, r, hint, &res); err != nil {
+		if err := p.addRoutes(&opts, true, bridge, r, hint, &res); err != nil {
 			return res, err
 		}
 	}

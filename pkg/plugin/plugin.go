@@ -33,6 +33,7 @@ type DHCPNetworkOptions struct {
 	IPv6            bool
 	LeaseTimeout    time.Duration `mapstructure:"lease_timeout"`
 	IgnoreConflicts bool          `mapstructure:"ignore_conflicts"`
+	SkipRoutes      bool          `mapstructure:"skip_routes"`
 }
 
 func decodeOpts(input interface{}) (DHCPNetworkOptions, error) {

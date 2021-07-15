@@ -153,6 +153,7 @@ networks:
       bridge: my-bridge
       ipv6: 'true'
       ignore_conflicts: 'false'
+      skip_routes: 'false'
     ipam:
       driver: 'null'
 ```
@@ -168,8 +169,10 @@ Note:
  - If the `docker run` command times out waiting for a lease, you can try increasing the initial timeout value by
    passing `-o lease_timeout=60s` when creating the network (e.g. to increase to 60 seconds)
  - By default, a bridge can only be used for a single DHCP network. There is additionally a check to see if a bridge is
-	is used by any other Docker networks. To disable this check (it's also possible this check might mistakenly detect a
-  conflict), pass `-o ignore_conflicts=true` when creating the network.
+	 is used by any other Docker networks. To disable this check (it's also possible this check might mistakenly detect a
+   conflict), pass `-o ignore_conflicts=true` when creating the network.
+ - `docker-net-dhcp` will try to copy static routes from the host bridge to the container. To disable this behaviour,
+   pass `-o skip_routes=true` when creating the network.
 
 ## Debugging
 
