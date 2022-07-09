@@ -78,6 +78,20 @@ $ sudo iptables -A FORWARD -i my-bridge -j ACCEPT
 $ sudo dhcpcd my-bridge
 ```
 
+## Debian 11 (_Bullseye_)
+`apt install bridge-utils` before modifying the network config. After installing, modify `/etc/network/interfaces` eth0 interface and add my-bridge interface:
+```
+iface eth0 inet manual
+
+auto my-bridge
+iface my-bridge inet dhcp
+  bridge_ports eth0
+  pre-up ip link add my-bridge type bridge
+  pre-up iptables -A FORWARD -i my-bridge -j ACCEPT
+
+```
+
+## Docker network
 Once the bridge is ready, you can create the network:
 
 ```
