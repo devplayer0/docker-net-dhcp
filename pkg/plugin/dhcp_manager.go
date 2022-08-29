@@ -78,7 +78,7 @@ func (m *dhcpManager) renew(v6 bool, info udhcpc.Info) error {
 			Warn("udhcpc renew with changed IP")
 	}
 
-	if !v6 && info.Gateway != "" {
+	if !v6 && info.Gateway != "" && m.opts.Gateway == "" {
 		newGateway := net.ParseIP(info.Gateway)
 
 		routes, err := m.netHandle.RouteListFiltered(unix.AF_INET, &netlink.Route{
